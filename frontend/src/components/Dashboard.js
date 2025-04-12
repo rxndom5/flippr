@@ -12,12 +12,22 @@ import {
   Flex,
   SimpleGrid,
   Icon,
+  Drawer,
+  DrawerBody,
+  DrawerHeader,
+  DrawerOverlay,
+  DrawerContent,
+  DrawerCloseButton,
+  Badge,
+  IconButton,
+  useDisclosure,
 } from '@chakra-ui/react';
 import {
   CheckCircleIcon,
   StarIcon,
   CalendarIcon,
   CheckIcon,
+  BellIcon,
 } from '@chakra-ui/icons';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -26,10 +36,12 @@ import { useToast } from '@chakra-ui/toast';
 const Dashboard = () => {
   const navigate = useNavigate();
   const toast = useToast();
+  const { isOpen, onOpen, onClose } = useDisclosure();
   const username = localStorage.getItem('username') || 'User';
   const [goals, setGoals] = useState([]);
   const [budgets, setBudgets] = useState([]);
   const [achievements, setAchievements] = useState([]);
+  const [notifications, setNotifications] = useState([]);
   const [goalForm, setGoalForm] = useState({
     name: '',
     target_amount: '',
@@ -49,7 +61,7 @@ const Dashboard = () => {
     CheckIcon,
   };
 
-  // Fetch savings goals, budgets, and achievements
+  // Fetch savings goals, budgets, achievements, and notifications
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -79,6 +91,12 @@ const Dashboard = () => {
           headers: { 'X-Username': username },
         });
         setAchievements(achievementsResponse.data.achievements);
+
+        // Fetch notifications
+        const notificationsResponse = await axios.get('http://localhost:5001/notifications', {
+          headers: { 'X-Username': username },
+        });
+        setNotifications(notificationsResponse.data.notifications);
       } catch (error) {
         toast({
           title: 'Error',
@@ -90,6 +108,10 @@ const Dashboard = () => {
       }
     };
     fetchData();
+
+    // Poll for new notifications every 10 seconds
+    const interval = setInterval(fetchData, 10000);
+    return () => clearInterval(interval);
   }, [username, toast]);
 
   const handleGoalChange = (e) => {
@@ -177,6 +199,9 @@ const Dashboard = () => {
     navigate('/login');
   };
 
+  // Count unread notifications
+  const unreadCount = notifications.filter(n => !n.is_read).length;
+
   return (
     <Box
       minH="100vh"
@@ -202,15 +227,89 @@ const Dashboard = () => {
             <Heading size="lg" color="teal.600">
               Welcome, {username}!
             </Heading>
-            <Button
-              colorScheme="teal"
-              variant="outline"
-              size="md"
-              onClick={handleLogout}
-            >
-              Log Out
-            </Button>
+            <Flex align="center" gap={4}>
+              <Box position="relative">
+                <IconButton
+                  icon={<BellIcon />}
+                  colorScheme="teal"
+                  variant="outline"
+                  onClick={onOpen}
+                  aria-label="Notifications"
+                />
+                {unreadCount > 0 && (
+                  <Badge
+                    position="absolute"
+                    top="-1"
+                    right="-1"
+                    borderRadius="full"
+                    colorScheme="red"
+                    fontSize="0.8em"
+                    px={2}
+                  >
+                    {unreadCount}
+                  </Badge>
+                )}
+              </Box>
+              <Button
+                colorScheme="teal"
+                variant="outline"
+                size="md"
+                onClick={handleLogout}
+              >
+                Log Out
+              </Button>
+            </Flex>
           </Flex>
+
+          {/* Notification Drawer */}
+          <Drawer isOpen={isOpen} placement="right" onClose={onClose}>
+            <DrawerOverlay />
+            <DrawerContent>
+              <DrawerCloseButton />
+              <DrawerHeader borderBottomWidth="1px">Notifications</DrawerHeader>
+              <DrawerBody>
+                {notifications.filter(n => !n.is_read).length === 0 ? (
+                  <Text color="gray.500">No unread notifications.</Text>
+                ) : (
+                  <VStack spacing={4} align="stretch">
+                    {notifications
+                      .filter(n => !n.is_read)
+                      .map((not) => (
+                        <Box
+                          key={not.id}
+                          p={4}
+                          bg="teal.50"
+                          borderRadius="md"
+                          boxShadow="sm"
+                        >
+                          <Text fontWeight="medium">{not.message}</Text>
+                          <Text fontSize="xs" color="gray.500" mt={2}>
+                            {new Date(not.created_at).toLocaleString()}
+                          </Text>
+                          <Badge
+                            colorScheme={not.type === 'budget' ? 'red' : not.type === 'savings' ? 'green' : 'blue'}
+                            mt={2}
+                          >
+                            {not.type.charAt(0).toUpperCase() + not.type.slice(1)}
+                          </Badge>
+                        </Box>
+                      ))}
+                  </VStack>
+                )}
+                <Button
+                  colorScheme="teal"
+                  size="sm"
+                  mt={4}
+                  onClick={() => {
+                    onClose();
+                    navigate('/notifications');
+                  }}
+                >
+                  View All Notifications
+                </Button>
+              </DrawerBody>
+            </DrawerContent>
+          </Drawer>
 
           {/* Achievements Section */}
           <Box bg="white" p={6} borderRadius="md" boxShadow="md">
@@ -443,6 +542,14 @@ const Dashboard = () => {
               _hover={{ bg: 'teal.600' }}
             >
               Manage Transactions
+            </Button>
+            <Button
+              colorScheme="teal"
+              size="lg"
+              onClick={() => navigate('/notifications')}
+              _hover={{ bg: 'teal.600' }}
+            >
+              View All Notifications
             </Button>
           </Flex>
         </VStack>

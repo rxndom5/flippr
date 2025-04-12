@@ -9,7 +9,7 @@ import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import Transactions from './components/Transactions';
 import FinancialOverview from './components/FinancialOverview';
-
+import Notifications from './components/Notifications';
 const emotionCache = createCache({
   key: 'chakra-emotion-cache',
 });
@@ -62,6 +62,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <FinancialOverview />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/Notifications"
+                element={
+                  <ProtectedRoute>
+                    <Transactions />
                   </ProtectedRoute>
                 }
               />

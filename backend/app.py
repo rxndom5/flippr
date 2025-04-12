@@ -10,6 +10,7 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
 import json
+from decimal import Decimal
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -108,6 +109,26 @@ def categorize_transaction(description):
         elif any(word in description for word in ['savings', 'deposit', 'retirement', 'emergency']):
             return "Savings"
         return "Other"
+
+def create_notification(user_id, message, notification_type):
+    """Helper function to insert a notification into the database."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'INSERT INTO notifications (user_id, message, type, created_at, is_read) '
+            'VALUES (%s, %s, %s, %s, %s)',
+            (user_id, message, notification_type, datetime.now(), False)
+        )
+        conn.commit()
+        logger.info(f"Notification created for user_id {user_id}: {message}")
+    except mysql.connector.Error as err:
+        logger.error(f"Notification creation error: {str(err)}")
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 @app.route('/register', methods=['POST'])
 def register():
@@ -274,6 +295,7 @@ def savings_goals():
                 INSERT INTO savings_goals (user_id, name, target_amount, current_amount, deadline)
                 VALUES (%s, %s, %s, %s, %s)
             ''', (user_id, name, target_amount, 0.00, deadline_date))
+            create_notification(user_id, f"Created new savings goal: {name}", "savings")
             conn.commit()
             logger.info(f"Savings goal created for user {username}: {name}")
             return jsonify({'message': 'Savings goal created'}), 201
@@ -380,21 +402,48 @@ def transactions():
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
             ''', (user_id, amount, description, transaction_date, goal_id or None, budget_id or None, ai_category))
 
+            # Budget notification
+            if budget_id and amount < 0:
+                cursor.execute('''
+                    SELECT b.category, b.amount AS budget_amount, COALESCE(SUM(t.amount), 0) AS spent_amount
+                    FROM budgets b
+                    LEFT JOIN transactions t ON t.budget_id = b.id AND t.amount < 0
+                    WHERE b.id = %s AND b.user_id = %s
+                    GROUP BY b.id, b.category, b.amount
+                ''', (budget_id, user_id))
+                budget = cursor.fetchone()
+                if budget:
+                    spent = float(abs(budget['spent_amount'])) + abs(amount)
+                    limit = float(budget['budget_amount'])
+                    if spent >= limit:
+                        create_notification(user_id, f"Budget exceeded for {budget['category']}: ${spent:.2f}/ ${limit:.2f}", "budget")
+                    elif spent >= limit * 0.8:
+                        create_notification(user_id, f"Warning: {budget['category']} budget nearing limit: ${spent:.2f}/ ${limit:.2f}", "budget")
+
+            # Savings goal progress notification
             if goal_id and amount > 0:
                 cursor.execute('''
-                    UPDATE savings_goals
-                    SET current_amount = current_amount + %s
-                    WHERE id = %s AND user_id = %s
-                ''', (amount, goal_id, user_id))
-                # Check for "Savings Star"
-                cursor.execute('''
-                    SELECT current_amount, target_amount
+                    SELECT name, current_amount, target_amount
                     FROM savings_goals
                     WHERE id = %s AND user_id = %s
                 ''', (goal_id, user_id))
                 goal = cursor.fetchone()
-                if goal and goal['current_amount'] >= goal['target_amount']:
-                    award_achievement(user_id, 'Savings Star', 'Completed a savings goal', 'StarIcon')
+                if goal:
+                    cursor.execute('''
+                        UPDATE savings_goals
+                        SET current_amount = current_amount + %s
+                        WHERE id = %s AND user_id = %s
+                    ''', (amount, goal_id, user_id))
+                    new_current = float(goal['current_amount']) + amount
+                    target = float(goal['target_amount'])
+                    progress = (new_current / target) * 100
+                    milestones = [25, 50, 75, 100]
+                    for milestone in milestones:
+                        if (float(goal['current_amount']) / target * 100) < milestone <= progress:
+                            create_notification(user_id, f"Reached {milestone}% of savings goal '{goal['name']}': ${new_current:.2f}/ ${target:.2f}", "savings")
+                    # Check for "Savings Star"
+                    if new_current >= target:
+                        award_achievement(user_id, 'Savings Star', 'Completed a savings goal', 'StarIcon')
 
             # Award "First Step" for first transaction
             cursor.execute('SELECT COUNT(*) as count FROM transactions WHERE user_id = %s', (user_id,))
@@ -457,8 +506,6 @@ def delete_transaction(transaction_id):
                 WHERE id = %s AND user_id = %s
             ''', (transaction['amount'], transaction['goal_id'], user_id))
             logger.debug(f"Updated savings goal {transaction['goal_id']} for user {username}: subtracted {transaction['amount']}")
-
-        # Budget updates automatically via GET /budgets (no direct update needed)
 
         # Delete transaction
         cursor.execute('DELETE FROM transactions WHERE id = %s AND user_id = %s', (transaction_id, user_id))
@@ -541,6 +588,7 @@ def budgets():
                 INSERT INTO budgets (user_id, category, amount, period)
                 VALUES (%s, %s, %s, %s)
             ''', (user_id, category, amount, period))
+            create_notification(user_id, f"Created new budget: {category}", "budget")
             conn.commit()
             logger.info(f"Budget created for user {username}: {category}")
             return jsonify({'message': 'Budget created'}), 201
@@ -685,6 +733,17 @@ def transaction_report():
                         )
                 streak = streak_data['budget_streak']
 
+            # Financial insight notification
+            sorted_categories = sorted(category_sums.items(), key=lambda x: abs(x[1]), reverse=True)
+            if sorted_categories and abs(sorted_categories[0][1]) > total_expenses * 0.5:
+                top_category, top_amount = sorted_categories[0]
+                if top_amount < 0:  # Only for expenses
+                    create_notification(
+                        user_id,
+                        f"You're spending a lot on {top_category}: ${abs(top_amount):.2f}. Consider reviewing this category.",
+                        "insight"
+                    )
+
             # Prepare data for AI analysis
             report_data = {
                 'total_income': total_income,
@@ -797,15 +856,15 @@ def award_achievement(user_id, name, description, icon='StarIcon'):
         conn.commit()
         cursor.close()
         conn.close()
-        logging.info(f"Awarded achievement {name} to user_id {user_id}")
+        logger.info(f"Awarded achievement {name} to user_id {user_id}")
     except mysql.connector.Error as err:
-        logging.error(f"Achievement award error: {str(err)}")
-        
+        logger.error(f"Achievement award error: {str(err)}")
+
 @app.route('/achievements', methods=['GET'])
 def get_achievements():
     username = request.headers.get('X-Username')
     if not username:
-        logging.warning("Achievements fetch failed: Username required")
+        logger.warning("Achievements fetch failed: Username required")
         return jsonify({'error': 'Username required'}), 400
     try:
         conn = get_db_connection()
@@ -813,7 +872,7 @@ def get_achievements():
         cursor.execute('SELECT id FROM users WHERE username = %s', (username,))
         user = cursor.fetchone()
         if not user:
-            logging.warning(f"Achievements fetch failed: User {username} not found")
+            logger.warning(f"Achievements fetch failed: User {username} not found")
             return jsonify({'error': 'User not found'}), 404
         cursor.execute(
             'SELECT name, description, icon, earned_at FROM achievements WHERE user_id = %s',
@@ -822,10 +881,39 @@ def get_achievements():
         achievements = cursor.fetchall()
         cursor.close()
         conn.close()
-        logging.info(f"Fetched achievements for user {username}")
+        logger.info(f"Fetched achievements for user {username}")
         return jsonify({'achievements': achievements}), 200
     except mysql.connector.Error as err:
-        logging.error(f"Achievements fetch database error: {str(err)}")
+        logger.error(f"Achievements fetch database error: {str(err)}")
+        return jsonify({'error': str(err)}), 500
+
+@app.route('/notifications', methods=['GET'])
+def get_notifications():
+    username = request.headers.get('X-Username')
+    if not username:
+        logger.warning("Notifications fetch failed: Username required")
+        return jsonify({'error': 'Username required'}), 400
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute('SELECT id FROM users WHERE username = %s', (username,))
+        user = cursor.fetchone()
+        if not user:
+            logger.warning(f"Notifications fetch failed: User {username} not found")
+            return jsonify({'error': 'User not found'}), 404
+        cursor.execute('''
+            SELECT id, message, type, created_at, is_read
+            FROM notifications
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+        ''', (user['id'],))
+        notifications = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        logger.info(f"Fetched {len(notifications)} notifications for user {username}")
+        return jsonify({'notifications': notifications}), 200
+    except mysql.connector.Error as err:
+        logger.error(f"Notifications fetch database error: {str(err)}")
         return jsonify({'error': str(err)}), 500
 
 if __name__ == '__main__':
