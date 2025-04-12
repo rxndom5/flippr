@@ -9,49 +9,68 @@ const Dashboard = () => {
   const toast = useToast();
   const username = localStorage.getItem('username') || 'User';
   const [goals, setGoals] = useState([]);
-  const [formData, setFormData] = useState({
+  const [budgets, setBudgets] = useState([]);
+  const [goalForm, setGoalForm] = useState({
     name: '',
     target_amount: '',
     deadline: '',
   });
+  const [budgetForm, setBudgetForm] = useState({
+    category: '',
+    amount: '',
+  });
   const [loading, setLoading] = useState(false);
 
-  // Fetch savings goals
+  // Fetch savings goals and budgets
   useEffect(() => {
-    const fetchGoals = async () => {
+    const fetchData = async () => {
       try {
-        const response = await axios.get('http://localhost:5001/savings-goals', {
+        // Fetch goals
+        const goalsResponse = await axios.get('http://localhost:5001/savings-goals', {
           headers: { 'X-Username': username },
         });
-        // Convert string amounts to numbers
-        const formattedGoals = response.data.goals.map(goal => ({
+        const formattedGoals = goalsResponse.data.goals.map(goal => ({
           ...goal,
           target_amount: parseFloat(goal.target_amount),
           current_amount: parseFloat(goal.current_amount),
         }));
         setGoals(formattedGoals);
+
+        // Fetch budgets
+        const budgetsResponse = await axios.get('http://localhost:5001/budgets', {
+          headers: { 'X-Username': username },
+        });
+        setBudgets(budgetsResponse.data.budgets.map(b => ({
+          ...b,
+          budget_amount: parseFloat(b.budget_amount),
+          spent_amount: parseFloat(b.spent_amount),
+        })));
       } catch (error) {
         toast({
           title: 'Error',
-          description: error.response?.data?.error || 'Failed to fetch goals.',
+          description: error.response?.data?.error || 'Failed to fetch data.',
           status: 'error',
           duration: 3000,
           isClosable: true,
         });
       }
     };
-    fetchGoals();
+    fetchData();
   }, [username, toast]);
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+  const handleGoalChange = (e) => {
+    setGoalForm({ ...goalForm, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = async (e) => {
+  const handleBudgetChange = (e) => {
+    setBudgetForm({ ...budgetForm, [e.target.name]: e.target.value });
+  };
+
+  const handleGoalSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await axios.post('http://localhost:5001/savings-goals', formData, {
+      await axios.post('http://localhost:5001/savings-goals', goalForm, {
         headers: { 'X-Username': username },
       });
       toast({
@@ -61,8 +80,7 @@ const Dashboard = () => {
         duration: 3000,
         isClosable: true,
       });
-      setFormData({ name: '', target_amount: '', deadline: '' });
-      // Refresh goals
+      setGoalForm({ name: '', target_amount: '', deadline: '' });
       const response = await axios.get('http://localhost:5001/savings-goals', {
         headers: { 'X-Username': username },
       });
@@ -76,6 +94,41 @@ const Dashboard = () => {
       toast({
         title: 'Error',
         description: error.response?.data?.error || 'Failed to create goal.',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    }
+    setLoading(false);
+  };
+
+  const handleBudgetSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await axios.post('http://localhost:5001/budgets', budgetForm, {
+        headers: { 'X-Username': username },
+      });
+      toast({
+        title: 'Success',
+        description: 'Budget created.',
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      });
+      setBudgetForm({ category: '', amount: '' });
+      const response = await axios.get('http://localhost:5001/budgets', {
+        headers: { 'X-Username': username },
+      });
+      setBudgets(response.data.budgets.map(b => ({
+        ...b,
+        budget_amount: parseFloat(b.budget_amount),
+        spent_amount: parseFloat(b.spent_amount),
+      })));
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.response?.data?.error || 'Failed to create budget.',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -110,19 +163,19 @@ const Dashboard = () => {
       >
         <VStack spacing={6} align="start">
           <Heading color="teal.600">Welcome, {username}!</Heading>
-          <Text fontSize="lg">Your Savings Goals</Text>
 
-          {/* Form to Add Goal */}
+          {/* Savings Goals Section */}
+          <Text fontSize="lg">Your Savings Goals</Text>
           <Box w="full" p={4} bg="teal.50" borderRadius="md">
             <Text fontWeight="bold" mb={2}>Create a New Savings Goal</Text>
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={handleGoalSubmit}>
               <VStack spacing={4}>
                 <FormControl isRequired>
                   <FormLabel>Goal Name</FormLabel>
                   <Input
                     name="name"
-                    value={formData.name}
-                    onChange={handleChange}
+                    value={goalForm.name}
+                    onChange={handleGoalChange}
                     placeholder="e.g., Vacation Fund"
                     focusBorderColor="teal.500"
                   />
@@ -132,8 +185,8 @@ const Dashboard = () => {
                   <Input
                     type="number"
                     name="target_amount"
-                    value={formData.target_amount}
-                    onChange={handleChange}
+                    value={goalForm.target_amount}
+                    onChange={handleGoalChange}
                     placeholder="e.g., 5000"
                     focusBorderColor="teal.500"
                   />
@@ -143,8 +196,8 @@ const Dashboard = () => {
                   <Input
                     type="date"
                     name="deadline"
-                    value={formData.deadline}
-                    onChange={handleChange}
+                    value={goalForm.deadline}
+                    onChange={handleGoalChange}
                     focusBorderColor="teal.500"
                   />
                 </FormControl>
@@ -160,8 +213,6 @@ const Dashboard = () => {
               </VStack>
             </form>
           </Box>
-
-          {/* List of Goals */}
           <Box w="full">
             <Text fontWeight="bold" mb={2}>Your Goals</Text>
             {goals.length === 0 ? (
@@ -194,12 +245,86 @@ const Dashboard = () => {
             )}
           </Box>
 
-          {/* Placeholder for Transactions */}
+          {/* Budgets Section */}
+          <Text fontSize="lg">Your Budgets</Text>
           <Box w="full" p={4} bg="teal.50" borderRadius="md">
-            <Text fontWeight="bold">Recent Transactions</Text>
-            <Text>Coming soon: View your latest transactions.</Text>
+            <Text fontWeight="bold" mb={2}>Create a New Budget</Text>
+            <form onSubmit={handleBudgetSubmit}>
+              <VStack spacing={4}>
+                <FormControl isRequired>
+                  <FormLabel>Category</FormLabel>
+                  <Input
+                    name="category"
+                    value={budgetForm.category}
+                    onChange={handleBudgetChange}
+                    placeholder="e.g., Groceries"
+                    focusBorderColor="teal.500"
+                  />
+                </FormControl>
+                <FormControl isRequired>
+                  <FormLabel>Amount ($)</FormLabel>
+                  <Input
+                    type="number"
+                    name="amount"
+                    value={budgetForm.amount}
+                    onChange={handleBudgetChange}
+                    placeholder="e.g., 500"
+                    focusBorderColor="teal.500"
+                  />
+                </FormControl>
+                <Button
+                  type="submit"
+                  colorScheme="teal"
+                  w="full"
+                  isLoading={loading}
+                  _hover={{ bg: 'teal.600' }}
+                >
+                  Add Budget
+                </Button>
+              </VStack>
+            </form>
+          </Box>
+          <Box w="full">
+            <Text fontWeight="bold" mb={2}>Your Budgets</Text>
+            {budgets.length === 0 ? (
+              <Text color="gray.500">No budgets yet.</Text>
+            ) : (
+              budgets.map((budget) => (
+                <Box
+                  key={budget.id}
+                  p={4}
+                  mb={3}
+                  bg="teal.50"
+                  borderRadius="md"
+                  boxShadow="sm"
+                >
+                  <Text fontWeight="bold">{budget.category}</Text>
+                  <Text>
+                    Budget: ${budget.budget_amount.toFixed(2)} | Spent: $
+                    {Math.abs(budget.spent_amount).toFixed(2)} | Remaining: $
+                    {(budget.budget_amount - Math.abs(budget.spent_amount)).toFixed(2)}
+                  </Text>
+                  <Progress
+                    value={(Math.abs(budget.spent_amount) / budget.budget_amount) * 100}
+                    colorScheme={budget.spent_amount >= budget.budget_amount ? 'red' : 'teal'}
+                    size="sm"
+                    mt={2}
+                    borderRadius="md"
+                  />
+                </Box>
+              ))
+            )}
           </Box>
 
+          {/* Navigation */}
+          <Button
+            colorScheme="teal"
+            w="full"
+            onClick={() => navigate('/transactions')}
+            _hover={{ bg: 'teal.600' }}
+          >
+            Manage Transactions
+          </Button>
           <Button
             colorScheme="teal"
             w="full"

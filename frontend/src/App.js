@@ -7,6 +7,7 @@ import { Box, HStack } from '@chakra-ui/react';
 import Register from './components/Register';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
+import Transactions from './components/Transactions';
 
 const emotionCache = createCache({
   key: 'chakra-emotion-cache',
@@ -44,6 +45,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <Dashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/transactions"
+                element={
+                  <ProtectedRoute>
+                    <Transactions />
                   </ProtectedRoute>
                 }
               />
