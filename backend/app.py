@@ -264,7 +264,7 @@ def savings_goals():
         if conn:
             conn.close()
 
-@app.route('/transactions', methods=['GET', 'POST'])
+@app.route('/transactions', methods=['GET', 'POST', 'DELETE'])
 def transactions():
     username = request.headers.get('X-Username')
     if not username:
@@ -370,6 +370,70 @@ def transactions():
         return jsonify({'error': str(err)}), 500
     except Exception as e:
         logger.error(f"Transactions unexpected error: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+@app.route('/transactions/<int:transaction_id>', methods=['DELETE'])
+def delete_transaction(transaction_id):
+    username = request.headers.get('X-Username')
+    if not username:
+        logger.warning("Delete transaction failed: Username required")
+        return jsonify({'error': 'Username required'}), 400
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute('SELECT id FROM users WHERE username = %s', (username,))
+        user = cursor.fetchone()
+        if not user:
+            logger.warning(f"Delete transaction failed: User {username} not found")
+            return jsonify({'error': 'User not found'}), 404
+        user_id = user['id']
+
+        # Fetch transaction details
+        cursor.execute('''
+            SELECT amount, goal_id, budget_id
+            FROM transactions
+            WHERE id = %s AND user_id = %s
+        ''', (transaction_id, user_id))
+        transaction = cursor.fetchone()
+        if not transaction:
+            logger.warning(f"Delete transaction failed: Transaction {transaction_id} not found for user {username}")
+            return jsonify({'error': 'Transaction not found'}), 404
+
+        # Update savings goal if necessary
+        if transaction['goal_id'] and transaction['amount'] > 0:
+            cursor.execute('''
+                UPDATE savings_goals
+                SET current_amount = current_amount - %s
+                WHERE id = %s AND user_id = %s
+            ''', (transaction['amount'], transaction['goal_id'], user_id))
+            logger.debug(f"Updated savings goal {transaction['goal_id']} for user {username}: subtracted {transaction['amount']}")
+
+        # Budget updates automatically via GET /budgets (no direct update needed)
+
+        # Delete transaction
+        cursor.execute('DELETE FROM transactions WHERE id = %s AND user_id = %s', (transaction_id, user_id))
+        if cursor.rowcount == 0:
+            logger.warning(f"Delete transaction failed: No rows affected for transaction {transaction_id}")
+            return jsonify({'error': 'Transaction not found'}), 404
+
+        conn.commit()
+        logger.info(f"Transaction {transaction_id} deleted for user {username}")
+        return jsonify({'message': 'Transaction deleted'}), 200
+
+    except mysql.connector.Error as err:
+        logger.error(f"Delete transaction database error: {str(err)}")
+        return jsonify({'error': str(err)}), 500
+    except Exception as e:
+        logger.error(f"Delete transaction unexpected error: {str(e)}")
         return jsonify({'error': 'Internal server error'}), 500
     finally:
         if cursor:
