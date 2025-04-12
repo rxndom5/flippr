@@ -3,6 +3,17 @@ from flask_cors import CORS
 import mysql.connector
 import bcrypt
 from datetime import datetime
+from groq import Groq
+import os
+from dotenv import load_dotenv
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
@@ -14,8 +25,86 @@ db_config = {
     'database': 'budget_app'
 }
 
+# Initialize Groq client
+try:
+    groq_client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+    logger.info("Groq client initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize Groq client: {str(e)}")
+    raise
+
+# Load categorization prompt
+try:
+    with open('categorization_prompt.txt', 'r') as file:
+        CATEGORIZATION_PROMPT = file.read().strip()
+    logger.info("Categorization prompt loaded successfully")
+except FileNotFoundError:
+    logger.error("categorization_prompt.txt not found")
+    raise
+except Exception as e:
+    logger.error(f"Error loading categorization prompt: {str(e)}")
+    raise
+
 def get_db_connection():
-    return mysql.connector.connect(**db_config)
+    try:
+        conn = mysql.connector.connect(**db_config)
+        logger.debug("Database connection established")
+        return conn
+    except mysql.connector.Error as err:
+        logger.error(f"Database connection error: {str(err)}")
+        raise
+
+def categorize_transaction(description):
+    """Use Groq to categorize a transaction description with improved accuracy."""
+    logger.debug(f"Categorizing transaction: {description}")
+    valid_categories = [
+        "Food", "Rent", "Entertainment", "Utilities", "Income", "Clothes",
+        "Transport", "Health", "Education", "Savings", "Other"
+    ]
+    try:
+        response = groq_client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[
+                {
+                    "role": "system",
+                    "content": CATEGORIZATION_PROMPT
+                },
+                {
+                    "role": "user",
+                    "content": f"Description: {description}"
+                }
+            ],
+            max_tokens=10,
+            temperature=0.3
+        )
+        category = response.choices[0].message.content.strip()
+        logger.debug(f"Groq returned category: {category}")
+        return category if category in valid_categories else "Other"
+    except Exception as e:
+        logger.error(f"Groq categorization error: {str(e)}")
+        # Fallback keyword matching
+        description = description.lower()
+        if any(word in description for word in ['jacket', 'shirt', 'pants', 'dress', 'shoes', 'jeans']):
+            return "Clothes"
+        elif any(word in description for word in ['car', 'gas', 'fuel', 'bus', 'train', 'taxi']):
+            return "Transport"
+        elif any(word in description for word in ['food', 'grocery', 'pizza', 'coffee', 'restaurant']):
+            return "Food"
+        elif any(word in description for word in ['rent', 'mortgage']):
+            return "Rent"
+        elif any(word in description for word in ['movie', 'concert', 'game', 'streaming']):
+            return "Entertainment"
+        elif any(word in description for word in ['electric', 'water', 'internet', 'phone']):
+            return "Utilities"
+        elif any(word in description for word in ['salary', 'paycheck', 'bonus', 'freelance']):
+            return "Income"
+        elif any(word in description for word in ['doctor', 'hospital', 'medicine', 'pharmacy']):
+            return "Health"
+        elif any(word in description for word in ['book', 'tuition', 'course', 'school']):
+            return "Education"
+        elif any(word in description for word in ['savings', 'deposit', 'retirement', 'emergency']):
+            return "Savings"
+        return "Other"
 
 @app.route('/register', methods=['POST'])
 def register():
@@ -27,6 +116,7 @@ def register():
     currency = data.get('currency', 'USD')
 
     if not username or not email or not password:
+        logger.warning("Registration failed: Missing required fields")
         return jsonify({'error': 'Missing required fields'}), 400
 
     hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
@@ -38,6 +128,7 @@ def register():
         cursor = conn.cursor()
         cursor.execute('SELECT id FROM users WHERE username = %s OR email = %s', (username, email))
         if cursor.fetchone():
+            logger.warning(f"Registration failed: Username {username} or email {email} exists")
             return jsonify({'error': 'Username or email already exists'}), 400
 
         cursor.execute('''
@@ -45,8 +136,10 @@ def register():
             VALUES (%s, %s, %s, %s, %s)
         ''', (username, email, hashed_password, full_name, currency))
         conn.commit()
+        logger.info(f"User registered: {username}")
         return jsonify({'message': 'Registration successful'}), 201
     except mysql.connector.Error as err:
+        logger.error(f"Registration database error: {str(err)}")
         return jsonify({'error': str(err)}), 500
     finally:
         if cursor:
@@ -61,6 +154,7 @@ def login():
     password = data.get('password')
 
     if not username or not password:
+        logger.warning("Login failed: Missing username or password")
         return jsonify({'error': 'Missing username or password'}), 400
 
     conn = None
@@ -72,17 +166,21 @@ def login():
         user = cursor.fetchone()
 
         if not user:
+            logger.warning(f"Login failed: Invalid username {username}")
             return jsonify({'error': 'Invalid username or password'}), 401
 
         if bcrypt.checkpw(password.encode('utf-8'), user['password_hash'].encode('utf-8')):
+            logger.info(f"User logged in: {username}")
             return jsonify({
                 'message': 'Login successful',
                 'username': user['username'],
                 'user_id': user['id']
             }), 200
         else:
+            logger.warning(f"Login failed: Invalid password for {username}")
             return jsonify({'error': 'Invalid username or password'}), 401
     except mysql.connector.Error as err:
+        logger.error(f"Login database error: {str(err)}")
         return jsonify({'error': str(err)}), 500
     finally:
         if cursor:
@@ -94,6 +192,7 @@ def login():
 def savings_goals():
     username = request.headers.get('X-Username')
     if not username:
+        logger.warning("Savings goals request failed: Username required")
         return jsonify({'error': 'Username required'}), 400
 
     conn = None
@@ -102,10 +201,10 @@ def savings_goals():
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # Get user_id
         cursor.execute('SELECT id FROM users WHERE username = %s', (username,))
         user = cursor.fetchone()
         if not user:
+            logger.warning(f"Savings goals failed: User {username} not found")
             return jsonify({'error': 'User not found'}), 404
         user_id = user['id']
 
@@ -116,6 +215,7 @@ def savings_goals():
                 WHERE user_id = %s
             ''', (user_id,))
             goals = cursor.fetchall()
+            logger.debug(f"Fetched {len(goals)} savings goals for user {username}")
             return jsonify({'goals': goals}), 200
 
         elif request.method == 'POST':
@@ -125,6 +225,7 @@ def savings_goals():
             deadline = data.get('deadline')
 
             if not name or not target_amount:
+                logger.warning("Savings goal creation failed: Missing name or target amount")
                 return jsonify({'error': 'Missing name or target amount'}), 400
 
             try:
@@ -132,6 +233,7 @@ def savings_goals():
                 if target_amount <= 0:
                     raise ValueError
             except (ValueError, TypeError):
+                logger.warning("Savings goal creation failed: Invalid target amount")
                 return jsonify({'error': 'Invalid target amount'}), 400
 
             deadline_date = None
@@ -139,6 +241,7 @@ def savings_goals():
                 try:
                     deadline_date = datetime.strptime(deadline, '%Y-%m-%d').date()
                 except ValueError:
+                    logger.warning("Savings goal creation failed: Invalid deadline format")
                     return jsonify({'error': 'Invalid deadline format (use YYYY-MM-DD)'}), 400
 
             cursor.execute('''
@@ -146,10 +249,15 @@ def savings_goals():
                 VALUES (%s, %s, %s, %s, %s)
             ''', (user_id, name, target_amount, 0.00, deadline_date))
             conn.commit()
+            logger.info(f"Savings goal created for user {username}: {name}")
             return jsonify({'message': 'Savings goal created'}), 201
 
     except mysql.connector.Error as err:
+        logger.error(f"Savings goals database error: {str(err)}")
         return jsonify({'error': str(err)}), 500
+    except Exception as e:
+        logger.error(f"Savings goals unexpected error: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
     finally:
         if cursor:
             cursor.close()
@@ -160,6 +268,7 @@ def savings_goals():
 def transactions():
     username = request.headers.get('X-Username')
     if not username:
+        logger.warning("Transactions request failed: Username required")
         return jsonify({'error': 'Username required'}), 400
 
     conn = None
@@ -168,16 +277,17 @@ def transactions():
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # Get user_id
         cursor.execute('SELECT id FROM users WHERE username = %s', (username,))
         user = cursor.fetchone()
         if not user:
+            logger.warning(f"Transactions failed: User {username} not found")
             return jsonify({'error': 'User not found'}), 404
         user_id = user['id']
 
         if request.method == 'GET':
             cursor.execute('''
-                SELECT t.id, t.amount, t.description, t.transaction_date, t.goal_id, g.name AS goal_name, t.budget_id, b.category AS budget_category
+                SELECT t.id, t.amount, t.description, t.transaction_date, t.goal_id, g.name AS goal_name,
+                       t.budget_id, b.category AS budget_category, t.ai_category
                 FROM transactions t
                 LEFT JOIN savings_goals g ON t.goal_id = g.id
                 LEFT JOIN budgets b ON t.budget_id = b.id
@@ -185,10 +295,12 @@ def transactions():
                 ORDER BY t.transaction_date DESC
             ''', (user_id,))
             transactions = cursor.fetchall()
+            logger.debug(f"Fetched {len(transactions)} transactions for user {username}")
             return jsonify({'transactions': transactions}), 200
 
         elif request.method == 'POST':
             data = request.get_json()
+            logger.debug(f"Transaction POST data: {data}")
             amount = data.get('amount')
             description = data.get('description')
             transaction_date = data.get('transaction_date')
@@ -196,37 +308,52 @@ def transactions():
             budget_id = data.get('budget_id')
 
             if not amount or not description or not transaction_date:
+                logger.warning("Transaction creation failed: Missing required fields")
                 return jsonify({'error': 'Missing required fields'}), 400
 
             try:
                 amount = float(amount)
             except (ValueError, TypeError):
+                logger.warning("Transaction creation failed: Invalid amount")
                 return jsonify({'error': 'Invalid amount'}), 400
 
             try:
                 transaction_date = datetime.strptime(transaction_date, '%Y-%m-%d').date()
             except ValueError:
+                logger.warning("Transaction creation failed: Invalid date format")
                 return jsonify({'error': 'Invalid date format (use YYYY-MM-DD)'}), 400
 
-            # Validate goal_id if provided
             if goal_id:
-                cursor.execute('SELECT id FROM savings_goals WHERE id = %s AND user_id = %s', (goal_id, user_id))
-                if not cursor.fetchone():
+                try:
+                    goal_id = int(goal_id)
+                    cursor.execute('SELECT id FROM savings_goals WHERE id = %s AND user_id = %s', (goal_id, user_id))
+                    if not cursor.fetchone():
+                        logger.warning(f"Transaction creation failed: Invalid goal ID {goal_id}")
+                        return jsonify({'error': 'Invalid goal ID'}), 400
+                except (ValueError, TypeError):
+                    logger.warning("Transaction creation failed: Invalid goal ID format")
                     return jsonify({'error': 'Invalid goal ID'}), 400
 
-            # Validate budget_id if provided
             if budget_id:
-                cursor.execute('SELECT id FROM budgets WHERE id = %s AND user_id = %s', (budget_id, user_id))
-                if not cursor.fetchone():
+                try:
+                    budget_id = int(budget_id)
+                    cursor.execute('SELECT id FROM budgets WHERE id = %s AND user_id = %s', (budget_id, user_id))
+                    if not cursor.fetchone():
+                        logger.warning(f"Transaction creation failed: Invalid budget ID {budget_id}")
+                        return jsonify({'error': 'Invalid budget ID'}), 400
+                except (ValueError, TypeError):
+                    logger.warning("Transaction creation failed: Invalid budget ID format")
                     return jsonify({'error': 'Invalid budget ID'}), 400
+
+            # Categorize using Groq
+            ai_category = categorize_transaction(description)
 
             # Insert transaction
             cursor.execute('''
-                INSERT INTO transactions (user_id, amount, description, transaction_date, goal_id, budget_id)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            ''', (user_id, amount, description, transaction_date, goal_id or None, budget_id or None))
+                INSERT INTO transactions (user_id, amount, description, transaction_date, goal_id, budget_id, ai_category)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ''', (user_id, amount, description, transaction_date, goal_id or None, budget_id or None, ai_category))
 
-            # Update savings goal current_amount if goal_id exists and amount is positive
             if goal_id and amount > 0:
                 cursor.execute('''
                     UPDATE savings_goals
@@ -235,10 +362,15 @@ def transactions():
                 ''', (amount, goal_id, user_id))
 
             conn.commit()
-            return jsonify({'message': 'Transaction created'}), 201
+            logger.info(f"Transaction created for user {username}: {description}, AI Category: {ai_category}")
+            return jsonify({'message': 'Transaction created', 'ai_category': ai_category}), 201
 
     except mysql.connector.Error as err:
+        logger.error(f"Transactions database error: {str(err)}")
         return jsonify({'error': str(err)}), 500
+    except Exception as e:
+        logger.error(f"Transactions unexpected error: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
     finally:
         if cursor:
             cursor.close()
@@ -249,6 +381,7 @@ def transactions():
 def budgets():
     username = request.headers.get('X-Username')
     if not username:
+        logger.warning("Budgets request failed: Username required")
         return jsonify({'error': 'Username required'}), 400
 
     conn = None
@@ -257,10 +390,10 @@ def budgets():
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # Get user_id
         cursor.execute('SELECT id FROM users WHERE username = %s', (username,))
         user = cursor.fetchone()
         if not user:
+            logger.warning(f"Budgets failed: User {username} not found")
             return jsonify({'error': 'User not found'}), 404
         user_id = user['id']
 
@@ -274,6 +407,7 @@ def budgets():
                 GROUP BY b.id, b.category, b.amount
             ''', (user_id,))
             budgets = cursor.fetchall()
+            logger.debug(f"Fetched {len(budgets)} budgets for user {username}")
             return jsonify({'budgets': budgets}), 200
 
         elif request.method == 'POST':
@@ -283,6 +417,7 @@ def budgets():
             period = data.get('period', 'monthly')
 
             if not category or not amount:
+                logger.warning("Budget creation failed: Missing category or amount")
                 return jsonify({'error': 'Missing category or amount'}), 400
 
             try:
@@ -290,9 +425,11 @@ def budgets():
                 if amount <= 0:
                     raise ValueError
             except (ValueError, TypeError):
+                logger.warning("Budget creation failed: Invalid amount")
                 return jsonify({'error': 'Invalid amount'}), 400
 
             if period not in ['monthly', 'weekly']:
+                logger.warning("Budget creation failed: Invalid period")
                 return jsonify({'error': 'Invalid period (use monthly or weekly)'}), 400
 
             cursor.execute('''
@@ -300,10 +437,15 @@ def budgets():
                 VALUES (%s, %s, %s, %s)
             ''', (user_id, category, amount, period))
             conn.commit()
+            logger.info(f"Budget created for user {username}: {category}")
             return jsonify({'message': 'Budget created'}), 201
 
     except mysql.connector.Error as err:
+        logger.error(f"Budgets database error: {str(err)}")
         return jsonify({'error': str(err)}), 500
+    except Exception as e:
+        logger.error(f"Budgets unexpected error: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
     finally:
         if cursor:
             cursor.close()
