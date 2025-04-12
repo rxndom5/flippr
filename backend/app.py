@@ -2,11 +2,11 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import mysql.connector
 import bcrypt
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
 
-# Database configuration
 db_config = {
     'user': 'root',
     'password': 'shashank',  # Replace with your MySQL password
@@ -68,7 +68,7 @@ def login():
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        cursor.execute('SELECT username, password_hash FROM users WHERE username = %s', (username,))
+        cursor.execute('SELECT id, username, password_hash FROM users WHERE username = %s', (username,))
         user = cursor.fetchone()
 
         if not user:
@@ -77,10 +77,79 @@ def login():
         if bcrypt.checkpw(password.encode('utf-8'), user['password_hash'].encode('utf-8')):
             return jsonify({
                 'message': 'Login successful',
-                'username': user['username']
+                'username': user['username'],
+                'user_id': user['id']
             }), 200
         else:
             return jsonify({'error': 'Invalid username or password'}), 401
+    except mysql.connector.Error as err:
+        return jsonify({'error': str(err)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+@app.route('/savings-goals', methods=['GET', 'POST'])
+def savings_goals():
+    username = request.headers.get('X-Username')  # Sent from frontend
+    if not username:
+        return jsonify({'error': 'Username required'}), 400
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # Get user_id
+        cursor.execute('SELECT id FROM users WHERE username = %s', (username,))
+        user = cursor.fetchone()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        user_id = user['id']
+
+        if request.method == 'GET':
+            cursor.execute('''
+                SELECT id, name, target_amount, current_amount, deadline
+                FROM savings_goals
+                WHERE user_id = %s
+            ''', (user_id,))
+            goals = cursor.fetchall()
+            return jsonify({'goals': goals}), 200
+
+        elif request.method == 'POST':
+            data = request.get_json()
+            name = data.get('name')
+            target_amount = data.get('target_amount')
+            deadline = data.get('deadline')  # Optional, format: YYYY-MM-DD
+
+            if not name or not target_amount:
+                return jsonify({'error': 'Missing name or target amount'}), 400
+
+            # Validate target_amount
+            try:
+                target_amount = float(target_amount)
+                if target_amount <= 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                return jsonify({'error': 'Invalid target amount'}), 400
+
+            # Validate deadline if provided
+            deadline_date = None
+            if deadline:
+                try:
+                    deadline_date = datetime.strptime(deadline, '%Y-%m-%d').date()
+                except ValueError:
+                    return jsonify({'error': 'Invalid deadline format (use YYYY-MM-DD)'}), 400
+
+            cursor.execute('''
+                INSERT INTO savings_goals (user_id, name, target_amount, current_amount, deadline)
+                VALUES (%s, %s, %s, %s, %s)
+            ''', (user_id, name, target_amount, 0.00, deadline_date))
+            conn.commit()
+            return jsonify({'message': 'Savings goal created'}), 201
+
     except mysql.connector.Error as err:
         return jsonify({'error': str(err)}), 500
     finally:
