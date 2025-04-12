@@ -9,7 +9,7 @@ CORS(app)
 # Database configuration
 db_config = {
     'user': 'root',
-    'password': 'shashank',  # Replace with your MySQL password
+    'password': 'qwerty',  # Replace with your MySQL password
     'host': 'localhost',
     'database': 'budget_app'
 }
@@ -68,7 +68,7 @@ def login():
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        cursor.execute('SELECT username, password_hash FROM users WHERE username = %s', (username,))
+        cursor.execute('SELECT id, username, password_hash FROM users WHERE username = %s', (username,))
         user = cursor.fetchone()
 
         if not user:
@@ -77,10 +77,65 @@ def login():
         if bcrypt.checkpw(password.encode('utf-8'), user['password_hash'].encode('utf-8')):
             return jsonify({
                 'message': 'Login successful',
-                'username': user['username']
+                'username': user['username'],
+                'user_id': user['id']
             }), 200
         else:
             return jsonify({'error': 'Invalid username or password'}), 401
+    except mysql.connector.Error as err:
+        return jsonify({'error': str(err)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+@app.route('/expenses', methods=['POST'])
+def add_expense():
+    data = request.get_json()
+    user_id = data.get('user_id')
+    amount = data.get('amount')
+    category = data.get('category')
+    description = data.get('description')
+    expense_date = data.get('expense_date')
+
+    if not all([user_id, amount, category, expense_date]):
+        return jsonify({'error': 'Missing required fields'}), 400
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO expenses (user_id, amount, category, description, expense_date)
+            VALUES (%s, %s, %s, %s, %s)
+        ''', (user_id, amount, category, description, expense_date))
+        conn.commit()
+        return jsonify({'message': 'Expense added successfully'}), 201
+    except mysql.connector.Error as err:
+        return jsonify({'error': str(err)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+@app.route('/expenses/<int:user_id>', methods=['GET'])
+def get_expenses(user_id):
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute('''
+            SELECT id, amount, category, description, expense_date
+            FROM expenses
+            WHERE user_id = %s
+            ORDER BY expense_date DESC
+        ''', (user_id,))
+        expenses = cursor.fetchall()
+        return jsonify({'expenses': expenses}), 200
     except mysql.connector.Error as err:
         return jsonify({'error': str(err)}), 500
     finally:

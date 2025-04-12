@@ -37,6 +37,7 @@ const Login = () => {
         isClosable: true,
       });
       localStorage.setItem('username', response.data.username);
+      localStorage.setItem('user_id', response.data.user_id);
       setFormData({ username: '', password: '' });
       navigate('/dashboard');
     } catch (error) {
