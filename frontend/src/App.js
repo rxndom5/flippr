@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { ChakraProvider, CSSReset } from '@chakra-ui/react';
 import { CacheProvider } from '@emotion/react';
@@ -9,6 +8,7 @@ import Register from './components/Register';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import Transactions from './components/Transactions';
+import FinancialOverview from './components/FinancialOverview';
 
 const emotionCache = createCache({
   key: 'chakra-emotion-cache',
@@ -54,6 +54,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <Transactions />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/financial-overview"
+                element={
+                  <ProtectedRoute>
+                    <FinancialOverview />
                   </ProtectedRoute>
                 }
               />
