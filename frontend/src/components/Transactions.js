@@ -19,6 +19,8 @@ import {
   Text,
   Flex,
   Container,
+  Radio,
+  RadioGroup,
 } from '@chakra-ui/react';
 import { ArrowBackIcon } from '@chakra-ui/icons';
 import axios from 'axios';
@@ -29,6 +31,7 @@ const Transactions = () => {
   const [goals, setGoals] = useState([]);
   const [budgets, setBudgets] = useState([]);
   const [formData, setFormData] = useState({
+    type: 'Debit', // Default to Debit
     amount: '',
     description: '',
     transaction_date: '',
@@ -83,14 +86,25 @@ const Transactions = () => {
     setFormData({ ...formData, [name]: value });
   };
 
+  const handleTypeChange = (value) => {
+    setFormData({ ...formData, type: value });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
+      // Convert amount based on type
+      const rawAmount = parseFloat(formData.amount);
+      if (isNaN(rawAmount) || rawAmount <= 0) {
+        throw new Error('Amount must be a positive number');
+      }
+      const amount = formData.type === 'Debit' ? -rawAmount : rawAmount;
+
       const response = await axios.post(
         'http://localhost:5001/transactions',
         {
-          amount: formData.amount,
+          amount: amount,
           description: formData.description,
           transaction_date: formData.transaction_date,
           goal_id: formData.goal_id || null,
@@ -110,6 +124,7 @@ const Transactions = () => {
         color: 'white',
       });
       setFormData({
+        type: 'Debit',
         amount: '',
         description: '',
         transaction_date: '',
@@ -121,7 +136,7 @@ const Transactions = () => {
       console.error('Error adding transaction:', error);
       toast({
         title: 'Error',
-        description: error.response?.data?.error || 'Failed to add transaction',
+        description: error.message || error.response?.data?.error || 'Failed to add transaction',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -189,13 +204,29 @@ const Transactions = () => {
           <form onSubmit={handleSubmit}>
             <VStack spacing={5}>
               <FormControl isRequired>
+                <FormLabel color="teal.600">Transaction Type</FormLabel>
+                <RadioGroup
+                  name="type"
+                  value={formData.type}
+                  onChange={handleTypeChange}
+                  colorScheme="teal"
+                >
+                  <HStack spacing={4}>
+                    <Radio value="Debit">Debit</Radio>
+                    <Radio value="Credit">Credit</Radio>
+                  </HStack>
+                </RadioGroup>
+              </FormControl>
+              <FormControl isRequired>
                 <FormLabel color="teal.600">Amount</FormLabel>
                 <Input
                   type="number"
                   name="amount"
                   value={formData.amount}
                   onChange={handleChange}
-                  placeholder="Enter amount (positive for income, negative for expense)"
+                  placeholder="Enter amount"
+                  step="0.01"
+                  min="0"
                   bg="white"
                   borderColor="teal.300"
                   _hover={{ borderColor: 'teal.500' }}
@@ -284,6 +315,7 @@ const Transactions = () => {
                 <Th>Date</Th>
                 <Th>Description</Th>
                 <Th isNumeric>Amount</Th>
+                <Th>Type</Th>
                 <Th>Goal</Th>
                 <Th>Budget</Th>
                 <Th>Action</Th>
@@ -295,6 +327,7 @@ const Transactions = () => {
                   <Td>{transaction.transaction_date}</Td>
                   <Td>{transaction.description}</Td>
                   <Td isNumeric>${Math.abs(transaction.amount).toFixed(2)}</Td>
+                  <Td>{transaction.amount < 0 ? 'Debit' : 'Credit'}</Td>
                   <Td>{transaction.goal_name || '-'}</Td>
                   <Td>{transaction.budget_category || '-'}</Td>
                   <Td>
@@ -342,6 +375,7 @@ const Transactions = () => {
                   <Text fontWeight="bold" color="teal.800">{transaction.description}</Text>
                   <Text color="teal.600">AI Category: {transaction.ai_category}</Text>
                   <Text color="teal.600">Amount: ${Math.abs(transaction.amount).toFixed(2)}</Text>
+                  <Text color="teal.600">Type: {transaction.amount < 0 ? 'Debit' : 'Credit'}</Text>
                 </Box>
               ))}
             </VStack>
