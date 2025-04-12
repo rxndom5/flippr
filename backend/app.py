@@ -1,4 +1,3 @@
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import mysql.connector
@@ -8,8 +7,6 @@ from groq import Groq
 import os
 from dotenv import load_dotenv
 import logging
-from collections import defaultdict
-from datetime import datetime, timedelta
 from collections import defaultdict
 from datetime import datetime, timedelta
 import json
@@ -176,6 +173,29 @@ def login():
             return jsonify({'error': 'Invalid username or password'}), 401
 
         if bcrypt.checkpw(password.encode('utf-8'), user['password_hash'].encode('utf-8')):
+            # Update login streak for "Consistent Planner"
+            today = datetime.now().date()
+            cursor.execute('SELECT streak, last_login FROM login_streaks WHERE user_id = %s', (user['id'],))
+            streak_data = cursor.fetchone()
+            if not streak_data:
+                streak = 1
+                cursor.execute(
+                    'INSERT INTO login_streaks (user_id, streak, last_login) VALUES (%s, %s, %s)',
+                    (user['id'], streak, today)
+                )
+            else:
+                if streak_data['last_login'] and streak_data['last_login'] < today - timedelta(days=1):
+                    streak = 1
+                else:
+                    streak = streak_data['streak'] + 1 if streak_data['last_login'] == today - timedelta(days=1) else 1
+                cursor.execute(
+                    'UPDATE login_streaks SET streak = %s, last_login = %s WHERE user_id = %s',
+                    (streak, today, user['id'])
+                )
+            if streak >= 7:
+                award_achievement(user['id'], 'Consistent Planner', 'Logged in daily for a week', 'CalendarIcon')
+
+            conn.commit()
             logger.info(f"User logged in: {username}")
             return jsonify({
                 'message': 'Login successful',
@@ -366,6 +386,21 @@ def transactions():
                     SET current_amount = current_amount + %s
                     WHERE id = %s AND user_id = %s
                 ''', (amount, goal_id, user_id))
+                # Check for "Savings Star"
+                cursor.execute('''
+                    SELECT current_amount, target_amount
+                    FROM savings_goals
+                    WHERE id = %s AND user_id = %s
+                ''', (goal_id, user_id))
+                goal = cursor.fetchone()
+                if goal and goal['current_amount'] >= goal['target_amount']:
+                    award_achievement(user_id, 'Savings Star', 'Completed a savings goal', 'StarIcon')
+
+            # Award "First Step" for first transaction
+            cursor.execute('SELECT COUNT(*) as count FROM transactions WHERE user_id = %s', (user_id,))
+            transaction_count = cursor.fetchone()['count']
+            if transaction_count == 1:
+                award_achievement(user_id, 'First Step', 'Added your first transaction', 'CheckCircleIcon')
 
             conn.commit()
             logger.info(f"Transaction created for user {username}: {description}, AI Category: {ai_category}")
@@ -622,6 +657,34 @@ def transaction_report():
                 } for b in budgets
             }
 
+            # Check for "Budget Master" achievement
+            all_within_budget = all(b['spent'] <= b['limit'] for b in budget_summary.values())
+            current_date = datetime.now().date()
+            cursor.execute('SELECT budget_streak, last_budget_check FROM streaks WHERE user_id = %s', (user_id,))
+            streak_data = cursor.fetchone()
+            if not streak_data:
+                streak = 0
+                cursor.execute(
+                    'INSERT INTO streaks (user_id, budget_streak, last_budget_check) VALUES (%s, %s, %s)',
+                    (user_id, streak, current_date)
+                )
+            else:
+                if streak_data['last_budget_check'] and streak_data['last_budget_check'].month != current_date.month:
+                    if all_within_budget:
+                        streak = streak_data['budget_streak'] + 1
+                        cursor.execute(
+                            'UPDATE streaks SET budget_streak = %s, last_budget_check = %s WHERE user_id = %s',
+                            (streak, current_date, user_id)
+                        )
+                        if streak >= 3:
+                            award_achievement(user_id, 'Budget Master', 'Stayed within budget for 3 months', 'CheckIcon')
+                    else:
+                        cursor.execute(
+                            'UPDATE streaks SET budget_streak = 0, last_budget_check = %s WHERE user_id = %s',
+                            (current_date, user_id)
+                        )
+                streak = streak_data['budget_streak']
+
             # Prepare data for AI analysis
             report_data = {
                 'total_income': total_income,
@@ -695,6 +758,7 @@ Keep the tone professional yet friendly, and limit the response to 300 words.
                 'ai_insights': ai_report
             }
 
+            conn.commit()
             logger.info(f"Transaction report generated for user {username}")
             return jsonify(report), 200
 
@@ -714,6 +778,55 @@ Keep the tone professional yet friendly, and limit the response to 300 words.
         logger.error(f"Transaction report unexpected error: {str(e)}")
         return jsonify({'error': 'Internal server error'}), 500
 
+def award_achievement(user_id, name, description, icon='StarIcon'):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT COUNT(*) FROM achievements WHERE user_id = %s AND name = %s',
+            (user_id, name)
+        )
+        if cursor.fetchone()[0] > 0:
+            cursor.close()
+            conn.close()
+            return  # Already awarded
+        cursor.execute(
+            'INSERT INTO achievements (user_id, name, description, icon) VALUES (%s, %s, %s, %s)',
+            (user_id, name, description, icon)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        logging.info(f"Awarded achievement {name} to user_id {user_id}")
+    except mysql.connector.Error as err:
+        logging.error(f"Achievement award error: {str(err)}")
+        
+@app.route('/achievements', methods=['GET'])
+def get_achievements():
+    username = request.headers.get('X-Username')
+    if not username:
+        logging.warning("Achievements fetch failed: Username required")
+        return jsonify({'error': 'Username required'}), 400
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute('SELECT id FROM users WHERE username = %s', (username,))
+        user = cursor.fetchone()
+        if not user:
+            logging.warning(f"Achievements fetch failed: User {username} not found")
+            return jsonify({'error': 'User not found'}), 404
+        cursor.execute(
+            'SELECT name, description, icon, earned_at FROM achievements WHERE user_id = %s',
+            (user['id'],)
+        )
+        achievements = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        logging.info(f"Fetched achievements for user {username}")
+        return jsonify({'achievements': achievements}), 200
+    except mysql.connector.Error as err:
+        logging.error(f"Achievements fetch database error: {str(err)}")
+        return jsonify({'error': str(err)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)

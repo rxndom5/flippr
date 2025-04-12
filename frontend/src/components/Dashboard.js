@@ -11,7 +11,14 @@ import {
   Progress,
   Flex,
   SimpleGrid,
+  Icon,
 } from '@chakra-ui/react';
+import {
+  CheckCircleIcon,
+  StarIcon,
+  CalendarIcon,
+  CheckIcon,
+} from '@chakra-ui/icons';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useToast } from '@chakra-ui/toast';
@@ -22,6 +29,7 @@ const Dashboard = () => {
   const username = localStorage.getItem('username') || 'User';
   const [goals, setGoals] = useState([]);
   const [budgets, setBudgets] = useState([]);
+  const [achievements, setAchievements] = useState([]);
   const [goalForm, setGoalForm] = useState({
     name: '',
     target_amount: '',
@@ -33,7 +41,15 @@ const Dashboard = () => {
   });
   const [loading, setLoading] = useState(false);
 
-  // Fetch savings goals and budgets
+  // Icon mapping for achievements
+  const iconMap = {
+    CheckCircleIcon,
+    StarIcon,
+    CalendarIcon,
+    CheckIcon,
+  };
+
+  // Fetch savings goals, budgets, and achievements
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -57,6 +73,12 @@ const Dashboard = () => {
           budget_amount: parseFloat(b.budget_amount),
           spent_amount: parseFloat(b.spent_amount),
         })));
+
+        // Fetch achievements
+        const achievementsResponse = await axios.get('http://localhost:5001/achievements', {
+          headers: { 'X-Username': username },
+        });
+        setAchievements(achievementsResponse.data.achievements);
       } catch (error) {
         toast({
           title: 'Error',
@@ -189,6 +211,42 @@ const Dashboard = () => {
               Log Out
             </Button>
           </Flex>
+
+          {/* Achievements Section */}
+          <Box bg="white" p={6} borderRadius="md" boxShadow="md">
+            <Text fontSize="xl" fontWeight="bold" mb={4} color="teal.700">
+              Achievements
+            </Text>
+            {achievements.length === 0 ? (
+              <Text color="gray.500">No achievements yet. Keep budgeting to earn badges!</Text>
+            ) : (
+              <SimpleGrid columns={{ base: 1, sm: 2, md: 4 }} spacing={4}>
+                {achievements.map((achievement) => (
+                  <Box
+                    key={achievement.name}
+                    p={4}
+                    bg="teal.50"
+                    borderRadius="md"
+                    boxShadow="sm"
+                    textAlign="center"
+                  >
+                    <Icon
+                      as={iconMap[achievement.icon] || StarIcon}
+                      w={8}
+                      h={8}
+                      color="teal.500"
+                      mb={2}
+                    />
+                    <Text fontWeight="bold">{achievement.name}</Text>
+                    <Text fontSize="sm">{achievement.description}</Text>
+                    <Text fontSize="xs" color="gray.500">
+                      Earned: {new Date(achievement.earned_at).toLocaleDateString()}
+                    </Text>
+                  </Box>
+                ))}
+              </SimpleGrid>
+            )}
+          </Box>
 
           {/* Savings Goals Section */}
           <Box bg="white" p={6} borderRadius="md" boxShadow="md">
