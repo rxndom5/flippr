@@ -1,3 +1,4 @@
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import mysql.connector
@@ -7,6 +8,8 @@ from groq import Groq
 import os
 from dotenv import load_dotenv
 import logging
+from collections import defaultdict
+from datetime import datetime, timedelta
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -515,6 +518,199 @@ def budgets():
             cursor.close()
         if conn:
             conn.close()
+
+@app.route('/transaction-report', methods=['GET'])
+def transaction_report():
+    username = request.headers.get('X-Username')
+    if not username:
+        logger.warning("Transaction report failed: Username required")
+        return jsonify({'error': 'Username required'}), 400
+
+    # Optional date range parameters (default: last 30 days)
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date', datetime.now().strftime('%Y-%m-%d'))
+    
+    try:
+        # Validate and set date range
+        end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+        if start_date:
+            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+        else:
+            start_date = end_date - timedelta(days=30)
+
+        if start_date > end_date:
+            logger.warning("Transaction report failed: Invalid date range")
+            return jsonify({'error': 'Start date cannot be after end date'}), 400
+
+        conn = None
+        cursor = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor(dictionary=True)
+
+            # Get user ID
+            cursor.execute('SELECT id FROM users WHERE username = %s', (username,))
+            user = cursor.fetchone()
+            if not user:
+                logger.warning(f"Transaction report failed: User {username} not found")
+                return jsonify({'error': 'User not found'}), 404
+            user_id = user['id']
+
+            # Fetch transactions
+            cursor.execute('''
+                SELECT amount, description, transaction_date, goal_id, budget_id, ai_category
+                FROM transactions
+                WHERE user_id = %s AND transaction_date BETWEEN %s AND %s
+                ORDER BY transaction_date DESC
+            ''', (user_id, start_date, end_date))
+            transactions = cursor.fetchall()
+
+            # Initialize aggregates
+            total_income = 0.0
+            total_expenses = 0.0
+            category_sums = defaultdict(float)
+            goal_contributions = defaultdict(float)
+            budget_spending = defaultdict(float)
+
+            # Process transactions
+            for t in transactions:
+                amount = float(t['amount'])
+                category = t['ai_category'] or 'Uncategorized'
+                if amount > 0:
+                    total_income += amount
+                else:
+                    total_expenses += abs(amount)
+                category_sums[category] += amount
+
+                if t['goal_id']:
+                    goal_contributions[t['goal_id']] += amount if amount > 0 else 0
+
+                if t['budget_id']:
+                    budget_spending[t['budget_id']] += abs(amount) if amount < 0 else 0
+
+            # Fetch savings goals
+            cursor.execute('''
+                SELECT id, name, target_amount, current_amount
+                FROM savings_goals
+                WHERE user_id = %s
+            ''', (user_id,))
+            goals = cursor.fetchall()
+            goal_summary = {
+                g['id']: {
+                    'name': g['name'],
+                    'target': float(g['target_amount']),
+                    'current': float(g['current_amount']),
+                    'contributed': goal_contributions.get(g['id'], 0.0)
+                } for g in goals
+            }
+
+            # Fetch budgets
+            cursor.execute('''
+                SELECT id, category, amount
+                FROM budgets
+                WHERE user_id = %s
+            ''', (user_id,))
+            budgets = cursor.fetchall()
+            budget_summary = {
+                b['id']: {
+                    'category': b['category'],
+                    'limit': float(b['amount']),
+                    'spent': budget_spending.get(b['id'], 0.0)
+                } for b in budgets
+            }
+
+            # Prepare data for AI analysis
+            report_data = {
+                'total_income': total_income,
+                'total_expenses': total_expenses,
+                'net_balance': total_income - total_expenses,
+                'categories': [
+                    {'name': k, 'amount': v, 'type': 'Income' if v > 0 else 'Expense'}
+                    for k, v in sorted(category_sums.items(), key=lambda x: abs(x[1]), reverse=True)
+                ],
+                'goals': [
+                    {'name': g['name'], 'target': g['target'], 'current': g['current'], 'contributed': g['contributed']}
+                    for g in goal_summary.values()
+                ],
+                'budgets': [
+                    {'category': b['category'], 'limit': b['limit'], 'spent': b['spent']}
+                    for b in budget_summary.values()
+                ]
+            }
+
+            # AI prompt for detailed report
+            ai_prompt = f"""
+You are a financial advisor analyzing a user's transactions from {start_date} to {end_date}. Provide a detailed report summarizing their financial activity and offer personalized advice. Use the following data:
+
+- Total Income: ${total_income:.2f}
+- Total Expenses: ${total_expenses:.2f}
+- Net Balance: ${(total_income - total_expenses):.2f}
+- Category Breakdown:
+{chr(10).join([f"  - {c['name']}: ${abs(c['amount']):.2f} ({c['type']})" for c in report_data['categories']])}
+- Savings Goals:
+{chr(10).join([f"  - {g['name']}: ${g['current']:.2f}/ ${g['target']:.2f} (Contributed: ${g['contributed']:.2f})" for g in report_data['goals']])}
+- Budgets:
+{chr(10).join([f"  - {b['category']}: Spent ${b['spent']:.2f}/ Limit ${b['limit']:.2f}" for b in report_data['budgets']])}
+
+Generate a report with:
+1. A summary of income, expenses, and net balance.
+2. Key observations about spending patterns (e.g., high spending categories).
+3. Progress on savings goals and any concerns.
+4. Budget adherence (e.g., overspending or underspending).
+5. 2-3 actionable pieces of advice to improve financial health.
+Keep the tone professional yet friendly, and limit the response to 300 words.
+"""
+
+            # Query Groq for report
+            try:
+                response = groq_client.chat.completions.create(
+                    model="llama3-70b-8192",
+                    messages=[
+                        {"role": "system", "content": "You are a financial advisor providing clear, concise, and actionable insights."},
+                        {"role": "user", "content": ai_prompt}
+                    ],
+                    max_tokens=350,
+                    temperature=0.5
+                )
+                ai_report = response.choices[0].message.content.strip()
+                logger.debug("Groq generated transaction report successfully")
+            except Exception as e:
+                logger.error(f"Groq report generation error: {str(e)}")
+                ai_report = "Unable to generate AI insights at this time."
+
+            # Combine raw data and AI report
+            report = {
+                'summary': {
+                    'total_income': total_income,
+                    'total_expenses': total_expenses,
+                    'net_balance': total_income - total_expenses,
+                    'period': f"{start_date} to {end_date}"
+                },
+                'categories': report_data['categories'],
+                'goals': report_data['goals'],
+                'budgets': report_data['budgets'],
+                'ai_insights': ai_report
+            }
+
+            logger.info(f"Transaction report generated for user {username}")
+            return jsonify(report), 200
+
+        except mysql.connector.Error as err:
+            logger.error(f"Transaction report database error: {str(err)}")
+            return jsonify({'error': str(err)}), 500
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    except ValueError as ve:
+        logger.warning(f"Transaction report failed: Invalid date format - {str(ve)}")
+        return jsonify({'error': 'Invalid date format (use YYYY-MM-DD)'}), 400
+    except Exception as e:
+        logger.error(f"Transaction report unexpected error: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
