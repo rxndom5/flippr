@@ -1,4 +1,4 @@
 flask
 flask-cors
 bcrypt
-mysql-connector-python
+mysql-connector-pythonbcrypt==4.2.0
