@@ -21,11 +21,20 @@ import {
   Alert,
   AlertIcon,
   Progress,
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+  Input,
+  IconButton,
+  useDisclosure,
 } from '@chakra-ui/react';
-import { InfoIcon, CheckCircleIcon } from '@chakra-ui/icons';
+import { InfoIcon, CheckCircleIcon, ArrowForwardIcon, QuestionIcon } from '@chakra-ui/icons';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { useToast } from '@chakra-ui/toast';
+import { useToast } from '@chakra-ui/react';
 import { Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, Legend } from 'chart.js';
 
@@ -37,6 +46,10 @@ const FinancialOverview = () => {
   const toast = useToast();
   const username = localStorage.getItem('username') || 'User';
   const [report, setReport] = useState(null);
+  const { isOpen, onOpen, onClose } = useDisclosure();
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
 
   // Fetch transaction report
   useEffect(() => {
@@ -78,6 +91,38 @@ const FinancialOverview = () => {
         },
       ],
     };
+  };
+
+  // Handle sending chat message
+  const handleSendMessage = async () => {
+    if (!input.trim() || !report) return;
+
+    const userMessage = { type: 'user', text: input };
+    setMessages((prev) => [...prev, userMessage]);
+    setInput('');
+    setLoading(true);
+
+    try {
+      const response = await axios.post(
+        'http://localhost:5001/chat',
+        { query: input, financialData: report },
+        { headers: { 'X-Username': username } }
+      );
+      const botMessage = { type: 'bot', text: response.data.response };
+      setMessages((prev) => [...prev, botMessage]);
+    } catch (error) {
+      const errorMessage = { type: 'bot', text: 'Sorry, something went wrong. Try again!' };
+      setMessages((prev) => [...prev, errorMessage]);
+      toast({
+        title: 'Chat Error',
+        description: error.response?.data?.error || 'Failed to get response.',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -324,6 +369,65 @@ const FinancialOverview = () => {
               <Text color="gray.500">Loading report...</Text>
             )}
           </Box>
+
+          {/* Chatbot Button */}
+          <Button
+            colorScheme="teal"
+            leftIcon={<QuestionIcon />}
+            onClick={onOpen}
+            position="fixed"
+            bottom="4"
+            right="4"
+            zIndex="10"
+          >
+            Chat with Advisor
+          </Button>
+
+          {/* Chatbot Modal */}
+          <Modal isOpen={isOpen} onClose={onClose} size="md">
+            <ModalOverlay />
+            <ModalContent>
+              <ModalHeader>Financial Advisor</ModalHeader>
+              <ModalBody>
+                <VStack
+                  spacing={3}
+                  align="stretch"
+                  maxH="400px"
+                  overflowY="auto"
+                  p={2}
+                >
+                  {messages.map((msg, idx) => (
+                    <Box
+                      key={idx}
+                      alignSelf={msg.type === 'user' ? 'flex-end' : 'flex-start'}
+                      bg={msg.type === 'user' ? 'teal.100' : 'gray.100'}
+                      p={3}
+                      borderRadius="md"
+                      maxW="80%"
+                    >
+                      <Text fontSize="sm">{msg.text}</Text>
+                    </Box>
+                  ))}
+                </VStack>
+              </ModalBody>
+              <ModalFooter>
+                <Input
+                  placeholder="Ask about your finances..."
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                  isDisabled={loading || !report}
+                  mr={2}
+                />
+                <IconButton
+                  icon={<ArrowForwardIcon />}
+                  colorScheme="teal"
+                  onClick={handleSendMessage}
+                  isDisabled={loading || !input.trim() || !report}
+                />
+              </ModalFooter>
+            </ModalContent>
+          </Modal>
         </VStack>
       </Box>
     </Box>

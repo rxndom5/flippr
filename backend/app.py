@@ -916,5 +916,89 @@ def get_notifications():
         logger.error(f"Notifications fetch database error: {str(err)}")
         return jsonify({'error': str(err)}), 500
 
+@app.route('/chat', methods=['POST'])
+def chat():
+    username = request.headers.get('X-Username')
+    if not username:
+        logger.warning("Chat request failed: Username required")
+        return jsonify({'error': 'Username required'}), 400
+
+    data = request.get_json()
+    query = data.get('query')
+    financial_data = data.get('financialData')
+
+    if not query or not financial_data:
+        logger.warning("Chat request failed: Missing query or financial data")
+        return jsonify({'error': 'Missing query or financial data'}), 400
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # Verify user
+        cursor.execute('SELECT id FROM users WHERE username = %s', (username,))
+        user = cursor.fetchone()
+        if not user:
+            logger.warning(f"Chat failed: User {username} not found")
+            return jsonify({'error': 'User not found'}), 404
+        user_id = user['id']
+
+        # Construct AI prompt
+        ai_prompt = f"""
+You are a financial advisor chatbot for a budget app. Answer the user's question based on their financial data and insights. Be concise, friendly, and actionable. Limit responses to 100 words.
+
+**Financial Data**:
+- Summary:
+  - Total Income: ${financial_data.get('summary', {}).get('total_income', 0):.2f}
+  - Total Expenses: ${financial_data.get('summary', {}).get('total_expenses', 0):.2f}
+  - Net Balance: ${financial_data.get('summary', {}).get('net_balance', 0):.2f}
+  - Period: {financial_data.get('summary', {}).get('period', 'Unknown')}
+- Categories:
+{chr(10).join([f"  - {c.get('name', 'Unknown')}: ${abs(c.get('amount', 0)):.2f} ({c.get('type', 'Unknown')})" for c in financial_data.get('categories', [])])}
+- Budgets:
+{chr(10).join([f"  - {b.get('category', 'Unknown')}: Spent ${b.get('spent', 0):.2f}/Limit ${b.get('limit', 0):.2f}" for b in financial_data.get('budgets', [])])}
+- Goals:
+{chr(10).join([f"  - {g.get('name', 'Unknown')}: ${g.get('current', 0):.2f}/${g.get('target', 0):.2f}" for g in financial_data.get('goals', [])])}
+- AI Insights: {financial_data.get('ai_insights', 'No insights available.')}
+
+**User Question**: {query}
+
+Provide a direct answer with relevant details from the data.
+"""
+
+        # Query Groq
+        try:
+            response = groq_client.chat.completions.create(
+                model="llama3-70b-8192",
+                messages=[
+                    {"role": "system", "content": "You are a financial advisor chatbot providing concise, data-driven answers."},
+                    {"role": "user", "content": ai_prompt}
+                ],
+                max_tokens=150,
+                temperature=0.5
+            )
+            ai_response = response.choices[0].message.content.strip()
+            logger.debug(f"Groq chat response: {ai_response}")
+        except Exception as e:
+            logger.error(f"Groq chat error: {str(e)}")
+            ai_response = "Sorry, I couldn't process your request. Try again later."
+
+        return jsonify({'response': ai_response}), 200
+
+    except mysql.connector.Error as err:
+        logger.error(f"Chat database error: {str(err)}")
+        return jsonify({'error': str(err)}), 500
+    except Exception as e:
+        logger.error(f"Chat unexpected error: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
