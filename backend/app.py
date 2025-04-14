@@ -24,7 +24,7 @@ CORS(app)
 
 db_config = {
     'user': 'root',
-    'password': 'shashank',  # Replace with your MySQL password
+    'password': 'qwerty',  # Replace with your MySQL password
     'host': 'localhost',
     'database': 'budget_app'
 }

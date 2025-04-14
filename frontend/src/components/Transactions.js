@@ -18,11 +18,28 @@ import {
   useToast,
   Text,
   Flex,
-  Container,
-  Radio,
+  IconButton,
+  ScaleFade,
+  SimpleGrid,
+  InputGroup,
+  InputLeftElement,
   RadioGroup,
+  Radio,
+  Drawer,
+  DrawerOverlay,
+  DrawerContent,
+  DrawerHeader,
+  DrawerBody,
+  DrawerCloseButton,
 } from '@chakra-ui/react';
-import { ArrowBackIcon } from '@chakra-ui/icons';
+import {
+  ArrowBackIcon,
+  DeleteIcon,
+  CalendarIcon,
+  InfoIcon,
+  AddIcon,
+  HamburgerIcon,
+} from '@chakra-ui/icons';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 
@@ -31,7 +48,7 @@ const Transactions = () => {
   const [goals, setGoals] = useState([]);
   const [budgets, setBudgets] = useState([]);
   const [formData, setFormData] = useState({
-    type: 'Debit', // Default to Debit
+    type: 'Debit',
     amount: '',
     description: '',
     transaction_date: '',
@@ -39,6 +56,7 @@ const Transactions = () => {
     budget_id: '',
   });
   const [loading, setLoading] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const toast = useToast();
   const navigate = useNavigate();
   const username = localStorage.getItem('username');
@@ -74,6 +92,7 @@ const Transactions = () => {
           status: 'error',
           duration: 3000,
           isClosable: true,
+          position: 'top-right',
         });
       }
     };
@@ -94,7 +113,6 @@ const Transactions = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      // Convert amount based on type
       const rawAmount = parseFloat(formData.amount);
       if (isNaN(rawAmount) || rawAmount <= 0) {
         throw new Error('Amount must be a positive number');
@@ -114,12 +132,25 @@ const Transactions = () => {
           headers: { 'X-Username': username },
         }
       );
+
+      const newTransaction = {
+        id: response.data.id || Date.now(),
+        amount: amount,
+        description: formData.description,
+        transaction_date: formData.transaction_date,
+        goal_name: goals.find((g) => g.id === formData.goal_id)?.name || null,
+        budget_category: budgets.find((b) => b.id === formData.budget_id)?.category || null,
+        ai_category: response.data.ai_category,
+      };
+      setTransactions((prev) => [newTransaction, ...prev]);
+
       toast({
         title: 'Success',
         description: `Transaction added. AI Category: ${response.data.ai_category}`,
         status: 'success',
         duration: 3000,
         isClosable: true,
+        position: 'top-right',
         bg: 'teal.500',
         color: 'white',
       });
@@ -131,7 +162,6 @@ const Transactions = () => {
         goal_id: '',
         budget_id: '',
       });
-      navigate('/dashboard');
     } catch (error) {
       console.error('Error adding transaction:', error);
       toast({
@@ -140,6 +170,7 @@ const Transactions = () => {
         status: 'error',
         duration: 3000,
         isClosable: true,
+        position: 'top-right',
       });
     } finally {
       setLoading(false);
@@ -162,6 +193,7 @@ const Transactions = () => {
         status: 'success',
         duration: 3000,
         isClosable: true,
+        position: 'top-right',
         bg: 'teal.500',
         color: 'white',
       });
@@ -173,216 +205,583 @@ const Transactions = () => {
         status: 'error',
         duration: 3000,
         isClosable: true,
+        position: 'top-right',
       });
     }
   };
 
   return (
-    <Container maxW="container.xl" py={8}>
-      <Button
-        leftIcon={<ArrowBackIcon />}
-        colorScheme="teal"
-        variant="outline"
-        mb={6}
-        onClick={() => navigate('/dashboard')}
+    <Box
+      minH="100vh"
+      bgGradient="linear(to-br, teal.800, teal.500)"
+      py={12}
+      px={{ base: 4, md: 8 }}
+    >
+      <Box
+        maxW="6xl"
+        mx="auto"
+        bg="rgba(255, 255, 255, 0.95)"
+        borderRadius="2xl"
+        boxShadow="0 8px 32px rgba(0, 0, 0, 0.15)"
+        p={{ base: 6, md: 10 }}
+        sx={{
+          animation: 'fadeIn 0.6s ease-out',
+          '@keyframes fadeIn': {
+            from: { opacity: 0, transform: 'translateY(20px)' },
+            to: { opacity: 1, transform: 'translateY(0)' },
+          },
+        }}
       >
-        Back to Dashboard
-      </Button>
-      <Flex direction={{ base: 'column', md: 'row' }} gap={8}>
-        <Box
-          flex="1"
-          p={6}
-          bg="teal.50"
-          shadow="md"
-          borderWidth="1px"
-          borderRadius="lg"
-          borderColor="teal.200"
-        >
-          <Heading size="lg" mb={6} color="teal.700">
-            Add Transaction
-          </Heading>
-          <form onSubmit={handleSubmit}>
-            <VStack spacing={5}>
-              <FormControl isRequired>
-                <FormLabel color="teal.600">Transaction Type</FormLabel>
-                <RadioGroup
-                  name="type"
-                  value={formData.type}
-                  onChange={handleTypeChange}
-                  colorScheme="teal"
-                >
-                  <HStack spacing={4}>
-                    <Radio value="Debit">Debit</Radio>
-                    <Radio value="Credit">Credit</Radio>
-                  </HStack>
-                </RadioGroup>
-              </FormControl>
-              <FormControl isRequired>
-                <FormLabel color="teal.600">Amount</FormLabel>
-                <Input
-                  type="number"
-                  name="amount"
-                  value={formData.amount}
-                  onChange={handleChange}
-                  placeholder="Enter amount"
-                  step="0.01"
-                  min="0"
-                  bg="white"
-                  borderColor="teal.300"
-                  _hover={{ borderColor: 'teal.500' }}
-                />
-              </FormControl>
-              <FormControl isRequired>
-                <FormLabel color="teal.600">Description</FormLabel>
-                <Input
-                  type="text"
-                  name="description"
-                  value={formData.description}
-                  onChange={handleChange}
-                  placeholder="Enter description"
-                  bg="white"
-                  borderColor="teal.300"
-                  _hover={{ borderColor: 'teal.500' }}
-                />
-              </FormControl>
-              <FormControl isRequired>
-                <FormLabel color="teal.600">Date</FormLabel>
-                <Input
-                  type="date"
-                  name="transaction_date"
-                  value={formData.transaction_date}
-                  onChange={handleChange}
-                  bg="white"
-                  borderColor="teal.300"
-                  _hover={{ borderColor: 'teal.500' }}
-                />
-              </FormControl>
-              <FormControl>
-                <FormLabel color="teal.600">Savings Goal</FormLabel>
-                <Select
-                  name="goal_id"
-                  value={formData.goal_id}
-                  onChange={handleChange}
-                  placeholder="Select savings goal (optional)"
-                  bg="white"
-                  borderColor="teal.300"
-                  _hover={{ borderColor: 'teal.500' }}
-                >
-                  {goals.map((goal) => (
-                    <option key={goal.id} value={goal.id}>
-                      {goal.name}
-                    </option>
-                  ))}
-                </Select>
-              </FormControl>
-              <FormControl>
-                <FormLabel color="teal.600">Budget</FormLabel>
-                <Select
-                  name="budget_id"
-                  value={formData.budget_id}
-                  onChange={handleChange}
-                  placeholder="Select budget (optional)"
-                  bg="white"
-                  borderColor="teal.300"
-                  _hover={{ borderColor: 'teal.500' }}
-                >
-                  {budgets.map((budget) => (
-                    <option key={budget.id} value={budget.id}>
-                      {budget.category}
-                    </option>
-                  ))}
-                </Select>
-              </FormControl>
-              <Button
-                type="submit"
-                colorScheme="teal"
-                isLoading={loading}
-                loadingText="Adding..."
-                size="lg"
-                width="full"
+        <VStack spacing={8} align="stretch">
+          {/* Header Section */}
+          <Flex
+            justify="space-between"
+            align="center"
+            bg="teal.50"
+            p={6}
+            borderRadius="xl"
+            boxShadow="0 4px 12px rgba(0, 0, 0, 0.05)"
+          >
+            <Heading
+              size="xl"
+              bgGradient="linear(to-r, teal.600, teal.400)"
+              bgClip="text"
+              fontWeight="extrabold"
+            >
+              Transactions
+            </Heading>
+            <Button
+              bg="teal.600"
+              color="white"
+              borderRadius="full"
+              leftIcon={<ArrowBackIcon />}
+              _hover={{ bg: 'teal.500', transform: 'translateY(-2px)' }}
+              size="lg"
+              onClick={() => navigate('/dashboard')}
+              transition="all 0.2s"
+            >
+              Back to Dashboard
+            </Button>
+          </Flex>
+
+          {/* Main Layout with Sidebar */}
+          <Flex direction={{ base: 'column', md: 'row' }} gap={6}>
+            {/* Main Content (Manage Transactions and Transaction History) */}
+            <Box flex="1">
+              {/* Manage Transactions Form */}
+              <Box
+                bg="white"
+                p={{ base: 6, md: 8 }}
+                borderRadius="xl"
+                boxShadow="0 6px 24px rgba(0, 0, 0, 0.1)"
+                border="1px solid rgba(0, 128, 128, 0.2)"
+                mb={6}
+                _before={{
+                  content: '""',
+                  position: 'absolute',
+                  top: '-12px',
+                  left: '50%',
+                  width: '30%',
+                  height: '4px',
+                  bgGradient: 'linear(to-r, teal.400, teal.600)',
+                  transform: 'translateX(-50%)',
+                  borderRadius: 'full',
+                }}
               >
-                Add Transaction
-              </Button>
-            </VStack>
-          </form>
-
-          <Heading size="md" mt={10} mb={4} color="teal.700">
-            Transaction History
-          </Heading>
-          <Table variant="simple" colorScheme="teal">
-            <Thead>
-              <Tr>
-                <Th>Date</Th>
-                <Th>Description</Th>
-                <Th isNumeric>Amount</Th>
-                <Th>Type</Th>
-                <Th>Goal</Th>
-                <Th>Budget</Th>
-                <Th>Action</Th>
-              </Tr>
-            </Thead>
-            <Tbody>
-              {transactions.map((transaction) => (
-                <Tr key={transaction.id}>
-                  <Td>{transaction.transaction_date}</Td>
-                  <Td>{transaction.description}</Td>
-                  <Td isNumeric>${Math.abs(transaction.amount).toFixed(2)}</Td>
-                  <Td>{transaction.amount < 0 ? 'Debit' : 'Credit'}</Td>
-                  <Td>{transaction.goal_name || '-'}</Td>
-                  <Td>{transaction.budget_category || '-'}</Td>
-                  <Td>
-                    <Button
-                      size="sm"
-                      colorScheme="red"
-                      onClick={() => handleDelete(transaction.id)}
-                    >
-                      Delete
-                    </Button>
-                  </Td>
-                </Tr>
-              ))}
-            </Tbody>
-          </Table>
-        </Box>
-
-        <Box
-          flex="1"
-          p={6}
-          bg="teal.50"
-          shadow="md"
-          borderWidth="1px"
-          borderRadius="lg"
-          borderColor="teal.200"
-        >
-          <Heading size="lg" mb={6} color="teal.700">
-            AI Categorization
-          </Heading>
-          {transactions.length === 0 ? (
-            <Text color="teal.600">No transactions available.</Text>
-          ) : (
-            <VStack spacing={4} align="start">
-              {transactions.map((transaction) => (
-                <Box
-                  key={transaction.id}
-                  p={4}
-                  bg="white"
-                  shadow="sm"
-                  borderWidth="1px"
-                  borderRadius="md"
-                  width="100%"
-                  borderColor="teal.300"
+                <Text
+                  fontSize={{ base: 'xl', md: '2xl' }}
+                  fontWeight="bold"
+                  mb={6}
+                  color="teal.700"
+                  bgGradient="linear(to-r, teal.600, teal.400)"
+                  bgClip="text"
                 >
-                  <Text fontWeight="bold" color="teal.800">{transaction.description}</Text>
-                  <Text color="teal.600">AI Category: {transaction.ai_category}</Text>
-                  <Text color="teal.600">Amount: ${Math.abs(transaction.amount).toFixed(2)}</Text>
-                  <Text color="teal.600">Type: {transaction.amount < 0 ? 'Debit' : 'Credit'}</Text>
-                </Box>
-              ))}
-            </VStack>
-          )}
-        </Box>
-      </Flex>
-    </Container>
+                  Manage Transactions
+                </Text>
+                <form onSubmit={handleSubmit}>
+                  <VStack spacing={5} align="stretch">
+                    <FormControl isRequired>
+                      <FormLabel color="teal.600" fontWeight="semibold" fontSize="sm">
+                        Transaction Type
+                      </FormLabel>
+                      <RadioGroup
+                        name="type"
+                        value={formData.type}
+                        onChange={handleTypeChange}
+                        colorScheme="teal"
+                      >
+                        <HStack spacing={6}>
+                          <Radio value="Debit" size="md">
+                            <Text color="teal.700">Debit</Text>
+                          </Radio>
+                          <Radio value="Credit" size="md">
+                            <Text color="teal.700">Credit</Text>
+                          </Radio>
+                        </HStack>
+                      </RadioGroup>
+                    </FormControl>
+                    <SimpleGrid columns={{ base: 1, sm: 2 }} spacing={4}>
+                      <FormControl isRequired>
+                        <FormLabel color="teal.600" fontWeight="semibold" fontSize="sm">
+                          Amount
+                        </FormLabel>
+                        <InputGroup>
+                          <InputLeftElement pointerEvents="none">
+                            <AddIcon color="teal.400" />
+                          </InputLeftElement>
+                          <Input
+                            type="number"
+                            name="amount"
+                            value={formData.amount}
+                            onChange={handleChange}
+                            placeholder="Enter amount"
+                            step="0.01"
+                            min="0"
+                            bg="teal.50"
+                            borderColor="teal.200"
+                            focusBorderColor="teal.400"
+                            borderRadius="lg"
+                            size="md"
+                            pl={10}
+                            _hover={{ borderColor: 'teal.300' }}
+                            _placeholder={{ color: 'teal.400' }}
+                            sx={{
+                              transition: 'all 0.2s',
+                              _focus: { transform: 'scale(1.02)' },
+                            }}
+                          />
+                        </InputGroup>
+                      </FormControl>
+                      <FormControl isRequired>
+                        <FormLabel color="teal.600" fontWeight="semibold" fontSize="sm">
+                          Date
+                        </FormLabel>
+                        <InputGroup>
+                          <InputLeftElement pointerEvents="none">
+                            <CalendarIcon color="teal.400" />
+                          </InputLeftElement>
+                          <Input
+                            type="date"
+                            name="transaction_date"
+                            value={formData.transaction_date}
+                            onChange={handleChange}
+                            bg="teal.50"
+                            borderColor="teal.200"
+                            focusBorderColor="teal.400"
+                            borderRadius="lg"
+                            size="md"
+                            pl={10}
+                            _hover={{ borderColor: 'teal.300' }}
+                            sx={{
+                              transition: 'all 0.2s',
+                              _focus: { transform: 'scale(1.02)' },
+                            }}
+                          />
+                        </InputGroup>
+                      </FormControl>
+                    </SimpleGrid>
+                    <FormControl isRequired>
+                      <FormLabel color="teal.600" fontWeight="semibold" fontSize="sm">
+                        Description
+                      </FormLabel>
+                      <InputGroup>
+                        <InputLeftElement pointerEvents="none">
+                          <InfoIcon color="teal.400" />
+                        </InputLeftElement>
+                        <Input
+                          type="text"
+                          name="description"
+                          value={formData.description}
+                          onChange={handleChange}
+                          placeholder="Enter description"
+                          bg="teal.50"
+                          borderColor="teal.200"
+                          focusBorderColor="teal.400"
+                          borderRadius="lg"
+                          size="md"
+                          pl={10}
+                          _hover={{ borderColor: 'teal.300' }}
+                          _placeholder={{ color: 'teal.400' }}
+                          sx={{
+                            transition: 'all 0.2s',
+                            _focus: { transform: 'scale(1.02)' },
+                          }}
+                        />
+                      </InputGroup>
+                    </FormControl>
+                    <SimpleGrid columns={{ base: 1, sm: 2 }} spacing={4}>
+                      <FormControl>
+                        <FormLabel color="teal.600" fontWeight="semibold" fontSize="sm">
+                          Savings Goal (Optional)
+                        </FormLabel>
+                        <Select
+                          name="goal_id"
+                          value={formData.goal_id}
+                          onChange={handleChange}
+                          placeholder="Select savings goal"
+                          bg="teal.50"
+                          borderColor="teal.200"
+                          focusBorderColor="teal.400"
+                          borderRadius="lg"
+                          size="md"
+                          _hover={{ borderColor: 'teal.300' }}
+                          sx={{
+                            transition: 'all 0.2s',
+                            _focus: { transform: 'scale(1.02)' },
+                          }}
+                        >
+                          {goals.map((goal) => (
+                            <option key={goal.id} value={goal.id}>
+                              {goal.name}
+                            </option>
+                          ))}
+                        </Select>
+                      </FormControl>
+                      <FormControl>
+                        <FormLabel color="teal.600" fontWeight="semibold" fontSize="sm">
+                          Budget (Optional)
+                        </FormLabel>
+                        <Select
+                          name="budget_id"
+                          value={formData.budget_id}
+                          onChange={handleChange}
+                          placeholder="Select budget"
+                          bg="teal.50"
+                          borderColor="teal.200"
+                          focusBorderColor="teal.400"
+                          borderRadius="lg"
+                          size="md"
+                          _hover={{ borderColor: 'teal.300' }}
+                          sx={{
+                            transition: 'all 0.2s',
+                            _focus: { transform: 'scale(1.02)' },
+                          }}
+                        >
+                          {budgets.map((budget) => (
+                            <option key={budget.id} value={budget.id}>
+                              {budget.category}
+                            </option>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </SimpleGrid>
+                    <Button
+                      type="submit"
+                      bg="teal.600"
+                      color="white"
+                      borderRadius="full"
+                      size="lg"
+                      width="full"
+                      isLoading={loading}
+                      loadingText="Adding..."
+                      _hover={{ bg: 'teal.500', transform: 'scale(1.05)' }}
+                      transition="all 0.2s"
+                      mt={4}
+                    >
+                      Add Transaction
+                    </Button>
+                  </VStack>
+                </form>
+              </Box>
+
+              {/* Transaction History */}
+              <Box
+                bg="teal.50"
+                p={4}
+                borderRadius="lg"
+                overflowX="auto"
+                sx={{
+                  '&::-webkit-scrollbar': {
+                    height: '8px',
+                  },
+                  '&::-webkit-scrollbar-track': {
+                    background: 'teal.100',
+                    borderRadius: '4px',
+                  },
+                  '&::-webkit-scrollbar-thumb': {
+                    background: 'teal.400',
+                    borderRadius: '4px',
+                  },
+                  '&::-webkit-scrollbar-thumb:hover': {
+                    background: 'teal.500',
+                  },
+                }}
+              >
+                <Text
+                  fontSize="lg"
+                  fontWeight="bold"
+                  mb={4}
+                  color="teal.700"
+                  bgGradient="linear(to-r, teal.600, teal.400)"
+                  bgClip="text"
+                >
+                  Transaction History
+                </Text>
+                {transactions.length === 0 ? (
+                  <Text
+                    color="teal.600"
+                    fontStyle="italic"
+                    textAlign="center"
+                    py={4}
+                  >
+                    No transactions available.
+                  </Text>
+                ) : (
+                  <Table variant="simple" size="sm">
+                    <Thead bg="teal.600">
+                      <Tr>
+                        <Th color="white" textAlign="center" p={2} fontSize="xs">
+                          Date
+                        </Th>
+                        <Th color="white" textAlign="center" p={2} fontSize="xs">
+                          Description
+                        </Th>
+                        <Th color="white" textAlign="center" p={2} fontSize="xs">
+                          Amount
+                        </Th>
+                        <Th color="white" textAlign="center" p={2} fontSize="xs">
+                          Type
+                        </Th>
+                        <Th color="white" textAlign="center" p={2} fontSize="xs">
+                          Goal
+                        </Th>
+                        <Th color="white" textAlign="center" p={2} fontSize="xs">
+                          Budget
+                        </Th>
+                        <Th color="white" textAlign="center" p={2} fontSize="xs">
+                          Action
+                        </Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {transactions.map((transaction, idx) => (
+                        <ScaleFade
+                          key={transaction.id}
+                          initialScale={0.95}
+                          in={true}
+                          delay={idx * 0.03}
+                        >
+                          <Tr
+                            _hover={{ bg: 'teal.100' }}
+                            transition="all 0.2s"
+                          >
+                            <Td textAlign="center" fontSize="xs" py={2}>
+                              {new Date(
+                                transaction.transaction_date
+                              ).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric',
+                              })}
+                            </Td>
+                            <Td textAlign="center" fontSize="xs" py={2}>
+                              {transaction.description || '-'}
+                            </Td>
+                            <Td textAlign="center" fontSize="xs" py={2}>
+                              ${Math.abs(transaction.amount).toFixed(2)}
+                            </Td>
+                            <Td textAlign="center" fontSize="xs" py={2}>
+                              {transaction.amount < 0 ? 'Debit' : 'Credit'}
+                            </Td>
+                            <Td textAlign="center" fontSize="xs" py={2}>
+                              {transaction.goal_name || '-'}
+                            </Td>
+                            <Td textAlign="center" fontSize="xs" py={2}>
+                              {transaction.budget_category || '-'}
+                            </Td>
+                            <Td textAlign="center" fontSize="xs" py={2}>
+                              <IconButton
+                                icon={<DeleteIcon />}
+                                colorScheme="red"
+                                size="xs"
+                                onClick={() => handleDelete(transaction.id)}
+                                borderRadius="full"
+                                _hover={{ transform: 'scale(1.2)' }}
+                                transition="all 0.2s"
+                                bg="red.500"
+                                color="white"
+                                p={1}
+                              />
+                            </Td>
+                          </Tr>
+                        </ScaleFade>
+                      ))}
+                    </Tbody>
+                  </Table>
+                )}
+              </Box>
+            </Box>
+
+            {/* AI Categorization Sidebar */}
+            <Box
+              as="aside"
+              w={{ base: 'full', md: '300px' }}
+              bg="teal.50"
+              p={4}
+              borderRadius="lg"
+              boxShadow="0 4px 12px rgba(0, 0, 0, 0.05)"
+              border="1px solid rgba(0, 128, 128, 0.2)"
+              overflowY="auto"
+              maxH={{ base: 'none', md: 'calc(100vh - 200px)' }}
+              position={{ base: 'relative', md: 'sticky' }}
+              top={{ md: '20' }}
+              display={{ base: isSidebarOpen ? 'block' : 'none', md: 'block' }}
+            >
+              <Flex
+                justify="space-between"
+                align="center"
+                mb={4}
+                display={{ md: 'none' }}
+              >
+                <Heading
+                  size="md"
+                  bgGradient="linear(to-r, teal.600, teal.400)"
+                  bgClip="text"
+                  fontWeight="extrabold"
+                >
+                  AI Categorization
+                </Heading>
+                <IconButton
+                  icon={<HamburgerIcon />}
+                  colorScheme="teal"
+                  onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                  borderRadius="full"
+                  aria-label="Toggle Sidebar"
+                />
+              </Flex>
+              {transactions.length === 0 ? (
+                <Text
+                  color="teal.600"
+                  fontStyle="italic"
+                  textAlign="center"
+                  py={4}
+                >
+                  No transactions to categorize.
+                </Text>
+              ) : (
+                <VStack spacing={3} align="stretch">
+                  {transactions.map((transaction, idx) => (
+                    <ScaleFade
+                      key={transaction.id}
+                      initialScale={0.9}
+                      in={true}
+                      delay={idx * 0.03}
+                    >
+                      <Box
+                        p={3}
+                        bg="white"
+                        borderRadius="md"
+                        boxShadow="0 2px 6px rgba(0, 0, 0, 0.05)"
+                        _hover={{
+                          bg: 'teal.100',
+                          transform: 'translateY(-2px)',
+                          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                        }}
+                        transition="all 0.2s"
+                      >
+                        <Text
+                          fontWeight="semibold"
+                          color="teal.700"
+                          fontSize="sm"
+                          mb={1}
+                        >
+                          {transaction.description}
+                        </Text>
+                        <Text color="teal.600" fontSize="xs">
+                          AI Category: {transaction.ai_category}
+                        </Text>
+                        <Text
+                          color={transaction.amount < 0 ? 'red.500' : 'teal.600'}
+                          fontSize="xs"
+                        >
+                          Amount: ${Math.abs(transaction.amount).toFixed(2)}
+                        </Text>
+                        <Text color="teal.600" fontSize="xs">
+                          Type: {transaction.amount < 0 ? 'Debit' : 'Credit'}
+                        </Text>
+                      </Box>
+                    </ScaleFade>
+                  ))}
+                </VStack>
+              )}
+            </Box>
+          </Flex>
+
+          {/* Mobile Drawer for Sidebar */}
+          <Drawer
+            isOpen={isSidebarOpen}
+            placement="right"
+            onClose={() => setIsSidebarOpen(false)}
+            size="xs"
+          >
+            <DrawerOverlay />
+            <DrawerContent bg="teal.50" borderLeft="1px solid rgba(0, 128, 128, 0.2)">
+              <DrawerHeader borderBottomWidth="1px" bg="teal.600" color="white">
+                AI Categorization
+                <DrawerCloseButton color="white" />
+              </DrawerHeader>
+              <DrawerBody p={4}>
+                {transactions.length === 0 ? (
+                  <Text
+                    color="teal.600"
+                    fontStyle="italic"
+                    textAlign="center"
+                    py={4}
+                  >
+                    No transactions to categorize.
+                  </Text>
+                ) : (
+                  <VStack spacing={3} align="stretch">
+                    {transactions.map((transaction, idx) => (
+                      <ScaleFade
+                        key={transaction.id}
+                        initialScale={0.9}
+                        in={true}
+                        delay={idx * 0.03}
+                      >
+                        <Box
+                          p={3}
+                          bg="white"
+                          borderRadius="md"
+                          boxShadow="0 2px 6px rgba(0, 0, 0, 0.05)"
+                          _hover={{
+                            bg: 'teal.100',
+                            transform: 'translateY(-2px)',
+                            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                          }}
+                          transition="all 0.2s"
+                        >
+                          <Text
+                            fontWeight="semibold"
+                            color="teal.700"
+                            fontSize="sm"
+                            mb={1}
+                          >
+                            {transaction.description}
+                          </Text>
+                          <Text color="teal.600" fontSize="xs">
+                            AI Category: {transaction.ai_category}
+                          </Text>
+                          <Text
+                            color={transaction.amount < 0 ? 'red.500' : 'teal.600'}
+                            fontSize="xs"
+                          >
+                            Amount: ${Math.abs(transaction.amount).toFixed(2)}
+                          </Text>
+                          <Text color="teal.600" fontSize="xs">
+                            Type: {transaction.amount < 0 ? 'Debit' : 'Credit'}
+                          </Text>
+                        </Box>
+                      </ScaleFade>
+                    ))}
+                  </VStack>
+                )}
+              </DrawerBody>
+            </DrawerContent>
+          </Drawer>
+        </VStack>
+      </Box>
+    </Box>
   );
 };
 
