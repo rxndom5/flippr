@@ -3,6 +3,7 @@
 **Budget App** is a full-stack personal finance application designed to help users manage their budgets, track transactions, set savings goals, earn achievements, and receive insightful notifications. Built with a Flask backend and a React frontend, it leverages a MySQL database for data persistence and Grok AI (via Groq API) for transaction categorization and financial insights. This project was developed for a hackathon, emphasizing user-friendly design and real-time financial tracking.
 
 ---
+![image](https://github.com/user-attachments/assets/da93af3d-11da-44c7-a0e9-0e383fba6bf2)
 
 ## Features
 
@@ -131,6 +132,7 @@
 git clone <repo-url>
 cd budget-app
 pip install -r requirements.txt
+```
 
 
 
