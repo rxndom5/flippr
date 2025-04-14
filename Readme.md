@@ -131,3 +131,6 @@
 git clone <repo-url>
 cd budget-app
 pip install -r requirements.txt
+
+
+
