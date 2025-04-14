@@ -91,7 +91,7 @@ updated latest UI
 - **Transaction Categorization**:
   - Uses Groq API (`llama3-70b-8192`) to assign categories based on descriptions.
   - Fallback: Keyword matching for reliability (e.g., "coffee" → "Food").
-- **Financial Insights**:
+- **Financial Insights and ChatBot **:
   - Grok generates detailed reports with actionable advice.
   - Example: Identifies high spending and suggests adjustments.
 
