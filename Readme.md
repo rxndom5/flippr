@@ -5,9 +5,6 @@
 ---
 updated latest UI
 ![image](https://github.com/user-attachments/assets/da93af3d-11da-44c7-a0e9-0e383fba6bf2)
-![image](https://github.com/user-attachments/assets/f195fe9d-ff51-4fc3-b175-913a595accf3)
-![image](https://github.com/user-attachments/assets/6d3d5564-c9e2-4e05-954c-38843207f416)
-
 
 
 ## Features
