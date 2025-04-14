@@ -6,7 +6,6 @@
 updated latest UI
 ![image](https://github.com/user-attachments/assets/da93af3d-11da-44c7-a0e9-0e383fba6bf2)
 
-
 ## Features
 
 ### 1. User Authentication
