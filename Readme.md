@@ -106,15 +106,15 @@ updated latest UI
   - Logging: Debug-level logs for errors, transactions, notifications
 
 - **Frontend**: React
-  - UI Library: Material-UI (assumed for `BellIcon`, `Drawer`, badges)
+  - UI Library: Material-UI (for `BellIcon`, `Drawer`, badges)
   - Pages: Dashboard, Notifications, Goals, Budgets, Reports
-  - Features: Real-time notifications, interactive charts (assumed)
+  - Features: Real-time notifications, interactive charts 
 
 - **Environment**: `.env` for API keys (e.g., `GROQ_API_KEY`)
 
 - **Dependencies**:
   - Backend: `flask`, `flask-cors`, `mysql-connector-python`, `bcrypt`, `groq`, `python-dotenv`
-  - Frontend: `react`, `axios`, `@mui/material` (assumed)
+  - Frontend: `react`, `axios`, `@mui/material` 
 
 ---
 
